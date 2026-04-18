@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Ежедневный отчет{% endblock %}
+{% block page_title %}Ежедневный отчет по магазину{% endblock %}
+{% block page_subtitle %}Продажи, кредиты и остатки по выбранной дате{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card form-card" style="max-width: 100%;">
+        <h3 class="card__title">Параметры отчета</h3>
+        <form method="get" class="form-grid">
+            <div class="form-group">
+                <label for="store">Магазин</label>
+                <select name="store" id="store" required>
+                    <option value="">Выберите магазин</option>
+                    {% for store in stores %}
+                        <option value="{{ store.id }}" {% if selected_store and selected_store.id == store.id %}selected{% endif %}>
+                            {{ store.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="date">Дата</label>
+                <input type="date" name="date" id="date" value="{{ report_date|date:'Y-m-d' }}">
+            </div>
+
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Показать отчет</button>
+            </div>
+        </form>
+    </section>
+
+    {% if selected_store %}
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Продажи за день</div>
+            <div class="stat-card__value">{{ total_sales_amount }}</div>
+            <div class="stat-card__meta">{{ selected_store.name }}</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Наличные</div>
+            <div class="stat-card__value">{{ cash_sales_total }}</div>
+            <div class="stat-card__meta">Продано за наличные</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Кредит</div>
+            <div class="stat-card__value">{{ credit_sales_total }}</div>
+            <div class="stat-card__meta">Отпущено в долг</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Текущий долг клиентов</div>
+            <div class="stat-card__value">{{ current_credit_debt }}</div>
+            <div class="stat-card__meta">По магазину на сейчас</div>
+        </div>
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Продажи за день</h3>
+            <p class="card__subtitle">{{ selected_store.name }} — {{ report_date|date:"d.m.Y" }}</p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Дата</th>
+                            <th>Тип оплаты</th>
+                            <th>Клиент</th>
+                            <th>Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in sale_rows %}
+                        <tr>
+                            <td>{{ sale.id }}</td>
+                            <td>{{ sale.date }}</td>
+                            <td>
+                                {% if sale.payment_type == "cash" %}
+                                    <span class="badge badge--success">Наличные</span>
+                                {% else %}
+                                    <span class="badge badge--warning">Кредит</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if sale.customer %}
+                                    {{ sale.customer.full_name }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>{{ sale.total_amount }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">За выбранную дату продаж нет.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Кому сегодня выдали в кредит</h3>
+            <p class="card__subtitle">Список клиентов за выбранный день</p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Клиент</th>
+                            <th>Телефон</th>
+                            <th>Сумма</th>
+                            <th>Остаток</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for credit in today_credit_clients %}
+                        <tr>
+                            <td>{{ credit.customer.full_name }}</td>
+                            <td>{{ credit.customer.phone }}</td>
+                            <td>{{ credit.original_amount }}</td>
+                            <td>{{ credit.remaining_amount }}</td>
+                            <td>
+                                {% if credit.status == "paid" %}
+                                    <span class="badge badge--success">Оплачен</span>
+                                {% elif credit.status == "partial" %}
+                                    <span class="badge badge--info">Частично</span>
+                                {% else %}
+                                    <span class="badge badge--warning">Не оплачен</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">Сегодня кредитов не выдавали.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Остатки товара на текущий момент</h3>
+        <p class="card__subtitle">{{ selected_store.name }}</p>
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Товар</th>
+                        <th>Количество (кг)</th>
+                        <th>Средняя закупочная цена</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in stock_rows %}
+                    <tr>
+                        <td>{{ row.product.name }}</td>
+                        <td>{{ row.quantity_kg }}</td>
+                        <td>{{ row.average_purchase_price }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="3">Остатков нет.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% else %}
+    <section class="card">
+        <h3 class="card__title">Выбери магазин и дату</h3>
+        <p class="card__subtitle">После выбора появится полный ежедневный отчет.</p>
+    </section>
+    {% endif %}
+</section>
+{% endblock %}

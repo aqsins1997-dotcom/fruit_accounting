@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Оплата долга{% endblock %}
+{% block page_title %}Оплата долга{% endblock %}
+{% block page_subtitle %}Создание платежа по кредиту без админки{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Клиент</div>
+            <div class="stat-card__value">{{ credit.customer.full_name|default:credit.customer.name }}</div>
+            <div class="stat-card__meta">{{ credit.customer.phone|default:"Телефон не указан" }}</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Магазин</div>
+            <div class="stat-card__value">{{ credit.store.name }}</div>
+            <div class="stat-card__meta">Кредит #{{ credit.id }}</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Остаток долга</div>
+            <div class="stat-card__value">{{ credit.remaining_amount }}</div>
+            <div class="stat-card__meta">Текущий остаток</div>
+        </div>
+    </section>
+
+    <section class="card form-card" style="max-width: 100%;">
+        <h3 class="card__title">Новая оплата</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+
+            <div class="form-group">
+                <label for="{{ form.date.id_for_label }}">Дата</label>
+                {{ form.date }}
+                {% if form.date.errors %}
+                    <div class="message error">{{ form.date.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.amount.id_for_label }}">Сумма</label>
+                {{ form.amount }}
+                {% if form.amount.errors %}
+                    <div class="message error">{{ form.amount.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group form-group--full">
+                <label for="{{ form.comment.id_for_label }}">Комментарий</label>
+                {{ form.comment }}
+                {% if form.comment.errors %}
+                    <div class="message error">{{ form.comment.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+
+            <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn--primary">Сохранить оплату</button>
+                <a href="{% url 'reports:debtor_detail' credit.customer_id %}" class="btn">Назад к карточке</a>
+            </div>
+        </form>
+    </section>
+</section>
+{% endblock %}

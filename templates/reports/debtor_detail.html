@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Карточка должника{% endblock %}
+{% block page_title %}Карточка должника{% endblock %}
+{% block page_subtitle %}История кредитов и оплат клиента{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Клиент</div>
+            <div class="stat-card__value">{{ customer.full_name|default:customer.name }}</div>
+            <div class="stat-card__meta">{{ customer.phone|default:"Телефон не указан" }}</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Всего взял</div>
+            <div class="stat-card__value">{{ total_taken }}</div>
+            <div class="stat-card__meta">Сумма всех кредитов</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Остаток долга</div>
+            <div class="stat-card__value">{{ total_remaining }}</div>
+            <div class="stat-card__meta">Текущий долг клиента</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Магазины и текущий долг</h3>
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'reports:debtor_detail_print' customer.id %}" class="btn btn--primary" target="_blank" rel="noopener">Печать карточки</a>
+            <a href="{% url 'reports:debtors_report' %}" class="btn">Назад к списку</a>
+        </div>
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Магазин</th>
+                        <th>Всего взял</th>
+                        <th>Текущий долг</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in stores_summary %}
+                    <tr>
+                        <td>{{ item.store__name }}</td>
+                        <td>{{ item.total_taken }}</td>
+                        <td>{{ item.total_remaining }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="3">По клиенту кредитов нет.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Активные долги</h3>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Магазин</th>
+                        <th>Дата</th>
+                        <th>Сумма долга</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for credit in current_debts %}
+                    <tr>
+                        <td>{{ credit.store.name }}</td>
+                        <td>{{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</td>
+                        <td>{{ credit.remaining_amount }}</td>
+                        <td><a href="{% url 'credits:credit_payment_create' credit.id %}" class="btn btn--primary">Оплатить</a></td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4">Активных долгов нет.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Кредиты</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Дата</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for credit in credits %}
+                        <tr>
+                            <td>{{ credit.store.name }}</td>
+                            <td>{{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</td>
+                            <td>{{ credit.original_amount }}</td>
+                            <td>{{ credit.comment|default:"—" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4">Кредиты отсутствуют.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Оплаты</h3>
+            <p class="card__subtitle">Всего оплатил: {{ total_paid }}</p>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Дата</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in payments %}
+                        <tr>
+                            <td>{{ payment.credit.store.name }}</td>
+                            <td>{{ payment.date|date:"d.m.Y" }}</td>
+                            <td>{{ payment.amount }}</td>
+                            <td>{{ payment.comment|default:"—" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4">Оплат пока нет.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}

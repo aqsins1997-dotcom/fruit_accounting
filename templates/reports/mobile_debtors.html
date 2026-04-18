@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Должники</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 18px 16px 28px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .title {
+            font-size: 26px;
+            font-weight: 700;
+            margin: 0;
+        }
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .field,
+        .button {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 12px;
+            border: 1px solid #cbd5e1;
+            padding: 14px;
+            font-size: 16px;
+        }
+        .button {
+            background: #111827;
+            color: #fff;
+            font-weight: 700;
+        }
+        .debtor {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 12px;
+        }
+        .name {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .meta {
+            color: #4b5563;
+            margin-bottom: 6px;
+        }
+        .amount {
+            font-size: 20px;
+            font-weight: 700;
+            margin: 10px 0 12px;
+        }
+        .open {
+            display: inline-block;
+            text-decoration: none;
+            background: #2563eb;
+            color: #fff;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <h1 class="title">Должники</h1>
+            <a href="{% url 'reports:mobile_home' %}">Назад</a>
+        </div>
+
+        <form method="get" class="card">
+            <input class="field" type="text" name="q" value="{{ search }}" placeholder="Поиск по клиенту" style="margin-bottom: 12px;">
+            <select class="field" name="store" style="margin-bottom: 12px;">
+                <option value="">Все магазины</option>
+                {% for store in stores %}
+                    <option value="{{ store.id }}" {% if selected_store and selected_store.id == store.id %}selected{% endif %}>{{ store.name }}</option>
+                {% endfor %}
+            </select>
+            <button class="button" type="submit">Показать</button>
+        </form>
+
+        {% for credit in credits %}
+            <div class="debtor">
+                <div class="name">{{ credit.customer.full_name|default:credit.customer.name }}</div>
+                <div class="meta">Магазин: {{ credit.store.name }}</div>
+                <div class="meta">Дата: {{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</div>
+                <div class="amount">Долг: {{ credit.remaining_amount }}</div>
+                <a class="open" href="{% url 'reports:mobile_debtor_detail' credit.id %}">Открыть</a>
+            </div>
+        {% empty %}
+            <div class="card">Активных долгов нет.</div>
+        {% endfor %}
+    </div>
+</body>
+</html>

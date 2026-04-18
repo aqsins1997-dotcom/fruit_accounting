@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мобильная панель</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 20px 16px 28px;
+        }
+        .title {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 0 0 8px;
+        }
+        .subtitle {
+            color: #4b5563;
+            margin: 0 0 20px;
+        }
+        .messages {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .message {
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 12px 14px;
+            border: 1px solid #dbe2ea;
+        }
+        .actions {
+            display: grid;
+            gap: 14px;
+        }
+        .action {
+            display: block;
+            text-decoration: none;
+            background: #ffffff;
+            color: #111827;
+            border-radius: 18px;
+            padding: 18px 16px;
+            border: 1px solid #dbe2ea;
+            font-size: 20px;
+            font-weight: 700;
+            box-shadow: 0 8px 20px rgba(17, 24, 39, 0.06);
+        }
+        .action small {
+            display: block;
+            margin-top: 6px;
+            font-size: 14px;
+            font-weight: 400;
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <h1 class="title">Сотрудники</h1>
+        <p class="subtitle">Быстрые действия для телефона</p>
+
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <div class="message">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="actions">
+            <a class="action" href="{% url 'reports:mobile_purchase_add' %}">Добавить закупку<small>Оформить новую закупку и строку товара</small></a>
+            <a class="action" href="{% url 'reports:mobile_debtors' %}">Список должников<small>Активные долги с поиском и фильтром</small></a>
+            <a class="action" href="{% url 'reports:mobile_debtors' %}">Внести оплату по долгу<small>Откройте должника и добавьте оплату</small></a>
+            <a class="action" href="{% url 'reports:mobile_sale_add' %}">Продажи<small>Добавить простую продажу с одной строкой</small></a>
+            <a class="action" href="{% url 'dashboard:index' %}">Назад на главную<small>Вернуться в основной интерфейс</small></a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить продажу</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 18px 16px 28px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin: 0 0 12px;
+        }
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        input, textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 12px;
+            border: 1px solid #cbd5e1;
+            padding: 14px;
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+        button {
+            width: 100%;
+            border: none;
+            border-radius: 14px;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: 700;
+            background: #111827;
+            color: #fff;
+        }
+        .message {
+            background: #fff;
+            border-radius: 18px;
+            padding: 14px 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .errorlist {
+            color: #b91c1c;
+            margin: -6px 0 10px;
+            padding-left: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div style="font-size: 24px; font-weight: 700;">Продажа</div>
+            <a href="{% url 'reports:mobile_home' %}">Назад</a>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="message">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="card">
+                <div class="section-title">Продажа</div>
+                <label for="{{ sale_form.store.id_for_label }}">Магазин</label>
+                {{ sale_form.store }}
+                {{ sale_form.store.errors }}
+
+                <label for="{{ sale_form.date.id_for_label }}">Дата</label>
+                {{ sale_form.date }}
+                {{ sale_form.date.errors }}
+
+                <label for="{{ sale_form.payment_type.id_for_label }}">Тип оплаты</label>
+                {{ sale_form.payment_type }}
+                {{ sale_form.payment_type.errors }}
+
+                <div id="customer-field">
+                    <label for="{{ sale_form.customer.id_for_label }}">Клиент</label>
+                    {{ sale_form.customer }}
+                    {{ sale_form.customer.errors }}
+                </div>
+
+                <label for="{{ sale_form.comment.id_for_label }}">Комментарий</label>
+                {{ sale_form.comment }}
+                {{ sale_form.comment.errors }}
+                {{ sale_form.non_field_errors }}
+            </div>
+
+            <div class="card">
+                <div class="section-title">Товар</div>
+                <label for="{{ item_form.product.id_for_label }}">Товар</label>
+                {{ item_form.product }}
+                {{ item_form.product.errors }}
+
+                <label for="{{ item_form.quantity_kg.id_for_label }}">Количество</label>
+                {{ item_form.quantity_kg }}
+                {{ item_form.quantity_kg.errors }}
+
+                <label for="{{ item_form.sale_price_per_kg.id_for_label }}">Цена</label>
+                {{ item_form.sale_price_per_kg }}
+                {{ item_form.sale_price_per_kg.errors }}
+
+                <button type="submit">Сохранить продажу</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        const paymentType = document.getElementById('{{ sale_form.payment_type.id_for_label }}');
+        const customerField = document.getElementById('customer-field');
+
+        function toggleCustomerField() {
+            if (!paymentType || !customerField) {
+                return;
+            }
+            customerField.style.display = paymentType.value === 'credit' ? 'block' : 'none';
+        }
+
+        toggleCustomerField();
+        if (paymentType) {
+            paymentType.addEventListener('change', toggleCustomerField);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Fruit Business{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar__brand">
+            <div class="brand-logo">FB</div>
+            <div>
+                <div class="brand-title">Fruit Business</div>
+                <div class="brand-subtitle">Учет торговли</div>
+            </div>
+        </div>
+
+        <nav class="sidebar__nav">
+            <div class="nav-section">
+                <div class="nav-section__title">Основное</div>
+                <a href="{% url 'dashboard:index' %}" class="nav-link">Дашборд</a>
+                <a href="{% url 'reports:daily_store_report' %}" class="nav-link">Ежедневный отчет</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Справочники</div>
+                <a href="/admin/core/store/" class="nav-link">Магазины</a>
+                <a href="/admin/core/product/" class="nav-link">Товары</a>
+                <a href="/admin/core/supplier/" class="nav-link">Поставщики</a>
+                <a href="/admin/core/seller/" class="nav-link">Продавцы</a>
+                <a href="/admin/core/customer/" class="nav-link">Клиенты</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Склад</div>
+                <a href="/admin/inventory/purchase/" class="nav-link">Закупки</a>
+                <a href="/admin/inventory/purchaseitem/" class="nav-link">Строки закупок</a>
+                <a href="/admin/inventory/storestock/" class="nav-link">Остатки</a>
+                <a href="/admin/inventory/stockmovement/" class="nav-link">Движения</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Поставщики</div>
+                <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги поставщикам</a>
+                <a href="/admin/payables/supplierpayment/" class="nav-link">Оплаты поставщикам</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Продажи и долги</div>
+                <a href="/admin/sales/sale/" class="nav-link">Продажи</a>
+                <a href="/admin/sales/saleitem/" class="nav-link">Строки продаж</a>
+                <a href="/admin/credits/credit/" class="nav-link">Кредиты</a>
+                <a href="/admin/credits/creditpayment/" class="nav-link">Платежи</a>
+                <a href="{% url 'reports:debtors_report' %}" class="nav-link">Должники</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Система</div>
+                <a href="/admin/" class="nav-link">Админка</a>
+                <a href="{% url 'logout' %}" class="nav-link nav-link--danger">Выйти</a>
+            </div>
+        </nav>
+    </aside>
+
+    <div class="main-area">
+        <header class="topbar">
+            <div>
+                <h1 class="page-title">{% block page_title %}Панель управления{% endblock %}</h1>
+                <p class="page-subtitle">{% block page_subtitle %}Управление магазинами, товарами и продажами{% endblock %}</p>
+            </div>
+
+            <div class="topbar__right">
+                {% if user.is_authenticated %}
+                    <div class="user-chip">
+                        <span class="user-chip__dot"></span>
+                        {{ user.username }}
+                    </div>
+                {% endif %}
+            </div>
+        </header>
+
+        <main class="content">
+            {% if messages %}
+                <div class="messages">
+                    {% for message in messages %}
+                        <div class="message {{ message.tags }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+</body>
+</html>

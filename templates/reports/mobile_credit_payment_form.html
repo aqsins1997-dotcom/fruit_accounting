@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Оплата долга</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 18px 16px 28px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        input, textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 12px;
+            border: 1px solid #cbd5e1;
+            padding: 14px;
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+        button {
+            width: 100%;
+            border: none;
+            border-radius: 14px;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: 700;
+            background: #111827;
+            color: #fff;
+        }
+        .errorlist {
+            color: #b91c1c;
+            margin: -6px 0 10px;
+            padding-left: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div style="font-size: 24px; font-weight: 700;">Оплата</div>
+            <a href="{% url 'reports:mobile_debtor_detail' credit.id %}">Назад</a>
+        </div>
+
+        <div class="card">
+            <div style="font-size: 18px; font-weight: 700;">{{ credit.customer.full_name|default:credit.customer.name }}</div>
+            <div style="color: #4b5563; margin-top: 4px;">{{ credit.store.name }}</div>
+            <div style="margin-top: 12px; font-size: 20px; font-weight: 700;">Долг: {{ credit.remaining_amount }}</div>
+        </div>
+
+        <form method="post" class="card">
+            {% csrf_token %}
+            <label for="{{ form.date.id_for_label }}">Дата</label>
+            {{ form.date }}
+            {{ form.date.errors }}
+
+            <label for="{{ form.amount.id_for_label }}">Сумма</label>
+            {{ form.amount }}
+            {{ form.amount.errors }}
+
+            <label for="{{ form.comment.id_for_label }}">Комментарий</label>
+            {{ form.comment }}
+            {{ form.comment.errors }}
+
+            {{ form.non_field_errors }}
+
+            <button type="submit">Сохранить оплату</button>
+        </form>
+    </div>
+</body>
+</html>

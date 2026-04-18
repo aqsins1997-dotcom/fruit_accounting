@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить закупку</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 18px 16px 28px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin: 0 0 12px;
+        }
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        input, textarea, select {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 12px;
+            border: 1px solid #cbd5e1;
+            padding: 14px;
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+        button {
+            width: 100%;
+            border: none;
+            border-radius: 14px;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: 700;
+            background: #111827;
+            color: #fff;
+        }
+        .message {
+            background: #fff;
+            border-radius: 18px;
+            padding: 14px 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .errorlist {
+            color: #b91c1c;
+            margin: -6px 0 10px;
+            padding-left: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div style="font-size: 24px; font-weight: 700;">Добавить закупку</div>
+            <a href="{% url 'reports:mobile_home' %}">Назад</a>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="message">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="card">
+                <div class="section-title">Закупка</div>
+                <label for="{{ purchase_form.supplier.id_for_label }}">Поставщик</label>
+                {{ purchase_form.supplier }}
+                {{ purchase_form.supplier.errors }}
+
+                <label for="{{ purchase_form.date.id_for_label }}">Дата</label>
+                {{ purchase_form.date }}
+                {{ purchase_form.date.errors }}
+
+                <label for="{{ purchase_form.comment.id_for_label }}">Комментарий</label>
+                {{ purchase_form.comment }}
+                {{ purchase_form.comment.errors }}
+            </div>
+
+            <div class="card">
+                <div class="section-title">Строка закупки</div>
+                <label for="{{ item_form.store.id_for_label }}">Магазин</label>
+                {{ item_form.store }}
+                {{ item_form.store.errors }}
+
+                <label for="{{ item_form.product.id_for_label }}">Товар</label>
+                {{ item_form.product }}
+                {{ item_form.product.errors }}
+
+                <label for="{{ item_form.quantity_kg.id_for_label }}">Количество кг</label>
+                {{ item_form.quantity_kg }}
+                {{ item_form.quantity_kg.errors }}
+
+                <label for="{{ item_form.purchase_price_per_kg.id_for_label }}">Цена закупки за кг</label>
+                {{ item_form.purchase_price_per_kg }}
+                {{ item_form.purchase_price_per_kg.errors }}
+
+                <button type="submit">Сохранить закупку</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

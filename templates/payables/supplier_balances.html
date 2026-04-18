@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Поставщики{% endblock %}
+{% block page_title %}Расчеты с поставщиками{% endblock %}
+{% block page_subtitle %}Сколько закупили, сколько оплатили и сколько должны по каждому магазину{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Закуплено всего</div>
+            <div class="stat-card__value">{{ summary.total_purchases }}</div>
+            <div class="stat-card__meta">Сумма всех закупок</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Оплачено поставщикам</div>
+            <div class="stat-card__value">{{ summary.total_payments }}</div>
+            <div class="stat-card__meta">Сумма всех оплат</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Общий долг</div>
+            <div class="stat-card__value">{{ summary.total_due }}</div>
+            <div class="stat-card__meta">Остаток задолженности</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Расчеты по магазинам и поставщикам</h3>
+        <p class="card__subtitle">Здесь видно, сколько каждый магазин должен каждому поставщику</p>
+
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="/admin/payables/supplierpayment/add/" class="btn btn--primary">Добавить оплату поставщику</a>
+            <a href="/admin/payables/supplierpayment/" class="btn">Список оплат</a>
+        </div>
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Магазин</th>
+                        <th>Поставщик</th>
+                        <th>Закуплено</th>
+                        <th>Оплачено</th>
+                        <th>Долг</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.store_name }}</td>
+                        <td>{{ row.supplier_name }}</td>
+                        <td>{{ row.purchases_total }}</td>
+                        <td>{{ row.payments_total }}</td>
+                        <td>
+                            {% if row.due_amount > 0 %}
+                                <span class="badge badge--warning">{{ row.due_amount }}</span>
+                            {% else %}
+                                <span class="badge badge--success">{{ row.due_amount }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5">Пока нет данных по расчетам с поставщиками.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</section>
+{% endblock %}

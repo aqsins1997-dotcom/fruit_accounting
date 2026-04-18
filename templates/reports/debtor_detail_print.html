@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Печать карточки должника</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+            color: #111827;
+        }
+
+        h1, h2 {
+            margin-bottom: 8px;
+        }
+
+        .subtitle,
+        .summary {
+            margin-bottom: 16px;
+            color: #4b5563;
+        }
+
+        .print-actions {
+            margin-bottom: 16px;
+        }
+
+        .print-button {
+            border: 1px solid #111827;
+            background: #111827;
+            color: #ffffff;
+            padding: 10px 18px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+
+        th,
+        td {
+            border: 1px solid #d1d5db;
+            padding: 8px 10px;
+            font-size: 14px;
+            text-align: left;
+        }
+
+        th {
+            background: #f3f4f6;
+        }
+
+        @media print {
+            .print-actions {
+                display: none;
+            }
+
+            body {
+                margin: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="print-actions">
+        <button type="button" class="print-button" onclick="window.print()">Печать</button>
+    </div>
+
+    <h1>Карточка должника</h1>
+    <p class="subtitle">{{ customer.full_name|default:customer.name }}{% if customer.phone %} | {{ customer.phone }}{% endif %}</p>
+    <p class="summary">Всего взял: {{ total_taken }} | Всего оплатил: {{ total_paid }} | Остаток: {{ total_remaining }}</p>
+
+    <h2>Кредиты</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Магазин</th>
+                <th>Дата</th>
+                <th>Сумма</th>
+                <th>Комментарий</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for credit in credits %}
+            <tr>
+                <td>{{ credit.store.name }}</td>
+                <td>{{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</td>
+                <td>{{ credit.original_amount }}</td>
+                <td>{{ credit.comment|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4">Кредиты отсутствуют.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Оплаты</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Магазин</th>
+                <th>Дата</th>
+                <th>Сумма</th>
+                <th>Комментарий</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for payment in payments %}
+            <tr>
+                <td>{{ payment.credit.store.name }}</td>
+                <td>{{ payment.date|date:"d.m.Y" }}</td>
+                <td>{{ payment.amount }}</td>
+                <td>{{ payment.comment|default:"—" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4">Оплат пока нет.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

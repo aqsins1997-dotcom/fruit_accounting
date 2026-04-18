@@ -1,0 +1,35 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход | Fruit Business</title>
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+</head>
+<body style="min-height: 100vh; display: grid; place-items: center; padding: 24px;">
+    <div class="card form-card" style="width: 100%; max-width: 460px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div class="brand-logo" style="margin: 0 auto 14px;">FB</div>
+            <h1 style="margin: 0; font-size: 28px;">Fruit Business</h1>
+            <p style="margin: 8px 0 0; color: var(--muted);">Вход в систему учета</p>
+        </div>
+
+        <form method="post" style="display: grid; gap: 16px;">
+            {% csrf_token %}
+
+            <div class="form-group">
+                <label for="id_username">Логин</label>
+                <input type="text" name="username" id="id_username" required>
+            </div>
+
+            <div class="form-group">
+                <label for="id_password">Пароль</label>
+                <input type="password" name="password" id="id_password" required>
+            </div>
+
+            <button type="submit" class="btn btn--primary" style="width: 100%;">Войти</button>
+        </form>
+    </div>
+</body>
+</html>

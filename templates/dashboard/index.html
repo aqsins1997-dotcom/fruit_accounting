@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд{% endblock %}
+{% block page_title %}Дашборд{% endblock %}
+{% block page_subtitle %}Общая статистика бизнеса{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="hero">
+        <h2 class="hero__title">Панель управления фруктовым бизнесом</h2>
+        <p class="hero__text">
+            Здесь отображается общая картина по магазинам, товарам, остаткам и продажам.
+            Дальше сюда подключим кредиты, платежи, ежедневные отчеты и аналитику по прибыли.
+        </p>
+    </section>
+
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Магазины</div>
+            <div class="stat-card__value">{{ stats.stores_count }}</div>
+            <div class="stat-card__meta">Всего активных точек</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Товары</div>
+            <div class="stat-card__value">{{ stats.products_count }}</div>
+            <div class="stat-card__meta">Всего в справочнике</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Общий остаток (кг)</div>
+            <div class="stat-card__value">{{ stats.total_stock }}</div>
+            <div class="stat-card__meta">Сумма по всем магазинам</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Продажи за сегодня</div>
+            <div class="stat-card__value">{{ stats.today_sales }}</div>
+            <div class="stat-card__meta">Текущая сумма продаж</div>
+        </div>
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Быстрые действия</h3>
+            <p class="card__subtitle">Переход к основным разделам</p>
+
+            <div class="quick-actions">
+                <a href="/admin/inventory/purchase/add/" class="btn btn--primary">Новая закупка</a>
+                <a href="/admin/inventory/storestock/" class="btn">Остатки</a>
+                <a href="/admin/sales/sale/add/" class="btn btn--success">Новая продажа</a>
+                <a href="/admin/" class="btn">Админка</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Статус проекта</h3>
+            <p class="card__subtitle">Текущее состояние системы</p>
+
+            <div class="kpi-row">
+                <span class="kpi-row__label">Справочники</span>
+                <span class="badge badge--success">Готово</span>
+            </div>
+            <div class="kpi-row">
+                <span class="kpi-row__label">Закупки и склад</span>
+                <span class="badge badge--success">Работает</span>
+            </div>
+            <div class="kpi-row">
+                <span class="kpi-row__label">Продажи</span>
+                <span class="badge badge--warning">В процессе</span>
+            </div>
+            <div class="kpi-row">
+                <span class="kpi-row__label">Кредиты</span>
+                <span class="badge badge--info">Следующий этап</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Магазин 1</h3>
+            <p class="card__subtitle">Будущий отчет по первой точке</p>
+
+            <ul class="list-clean">
+                <li>Продажи за день</li>
+                <li>Продажи за наличные</li>
+                <li>Продажи в кредит</li>
+                <li>Список должников</li>
+                <li>Остатки на конец дня</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Магазин 2</h3>
+            <p class="card__subtitle">Будущий отчет по второй точке</p>
+
+            <ul class="list-clean">
+                <li>Продажи за день</li>
+                <li>Продажи за наличные</li>
+                <li>Продажи в кредит</li>
+                <li>Список должников</li>
+                <li>Остатки на конец дня</li>
+            </ul>
+        </div>
+    </section>
+</section>
+{% endblock %}

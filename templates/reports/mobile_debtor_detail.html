@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Карточка должника</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #111827;
+        }
+        .page {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 18px 16px 28px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .topbar a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid #dbe2ea;
+            margin-bottom: 14px;
+        }
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 8px;
+        }
+        .meta {
+            color: #4b5563;
+            margin-bottom: 6px;
+        }
+        .amount {
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 12px;
+        }
+        .pay {
+            display: block;
+            text-align: center;
+            text-decoration: none;
+            background: #111827;
+            color: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-weight: 700;
+        }
+        .payment-row {
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .payment-row:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="topbar">
+            <div class="title">Должник</div>
+            <a href="{% url 'reports:mobile_debtors' %}">Назад</a>
+        </div>
+
+        {% if messages %}
+            <div class="card">
+                {% for message in messages %}
+                    <div>{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="title">{{ credit.customer.full_name|default:credit.customer.name }}</div>
+            <div class="meta">Магазин: {{ credit.store.name }}</div>
+            <div class="meta">Дата: {{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</div>
+            <div class="amount">Текущий долг: {{ credit.remaining_amount }}</div>
+        </div>
+
+        <a class="pay" href="{% url 'reports:mobile_credit_payment_add' credit.id %}" style="margin-bottom: 14px;">Внести оплату</a>
+
+        <div class="card">
+            <div class="title" style="font-size: 20px;">История оплат</div>
+            {% for payment in payments %}
+                <div class="payment-row">
+                    <div><strong>{{ payment.amount }}</strong></div>
+                    <div class="meta">Дата: {{ payment.date|date:"d.m.Y" }}</div>
+                    <div class="meta">Комментарий: {{ payment.comment|default:"—" }}</div>
+                </div>
+            {% empty %}
+                <div>Оплат пока нет.</div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>
