@@ -10,20 +10,51 @@
         <div class="stat-card">
             <div class="stat-card__label">Закуплено всего</div>
             <div class="stat-card__value">{{ summary.total_purchases|floatformat:2 }}</div>
-            <div class="stat-card__meta">Сумма всех закупок поставщиков</div>
+            <div class="stat-card__meta">Сумма закупок в текущем фильтре</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-card__label">Уже оплачено</div>
             <div class="stat-card__value">{{ summary.total_payments|floatformat:2 }}</div>
-            <div class="stat-card__meta">Сумма всех оплат поставщикам</div>
+            <div class="stat-card__meta">Сумма оплат в текущем фильтре</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-card__label">Общий долг</div>
             <div class="stat-card__value">{{ summary.total_due|floatformat:2 }}</div>
-            <div class="stat-card__meta">Остаток к оплате по всем поставщикам</div>
+            <div class="stat-card__meta">Остаток к оплате в текущем фильтре</div>
         </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Фильтры</h3>
+        <form method="get" class="form-grid" style="margin-bottom: 18px;">
+            <div class="form-group">
+                <label for="{{ filter_form.supplier.id_for_label }}">Поставщик</label>
+                {{ filter_form.supplier }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.store.id_for_label }}">Магазин</label>
+                {{ filter_form.store }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.status.id_for_label }}">Статус</label>
+                {{ filter_form.status }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.date_from.id_for_label }}">Дата от</label>
+                {{ filter_form.date_from }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.date_to.id_for_label }}">Дата до</label>
+                {{ filter_form.date_to }}
+            </div>
+            <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn--primary">Применить фильтры</button>
+                <a href="{% url 'payables:supplier_balances' %}" class="btn">Сбросить</a>
+                <a href="{% url 'payables:supplier_payment_create' %}" class="btn">Новая оплата поставщику</a>
+            </div>
+        </form>
     </section>
 
     <section class="card">
@@ -71,6 +102,7 @@
                                 <th>Оплачено</th>
                                 <th>Осталось</th>
                                 <th>Статус</th>
+                                <th>Действие</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -84,6 +116,13 @@
                                 <td>{{ row.paid_amount|floatformat:2 }}</td>
                                 <td>{{ row.remaining_amount|floatformat:2 }}</td>
                                 <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+                                <td>
+                                    {% if row.remaining_amount > 0 %}
+                                        <a href="{{ row.payment_url }}" class="btn">Оплатить</a>
+                                    {% else %}
+                                        <span class="badge badge--success">Закрыто</span>
+                                    {% endif %}
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -94,6 +133,7 @@
                                 <th>{{ group.paid_amount|floatformat:2 }}</th>
                                 <th>{{ group.remaining_amount|floatformat:2 }}</th>
                                 <th></th>
+                                <th></th>
                             </tr>
                         </tfoot>
                     </table>
@@ -102,8 +142,8 @@
             {% endfor %}
         {% else %}
             <div class="empty-state">
-                <h3>Долгов поставщикам пока нет</h3>
-                <p>Когда появятся закупки или оплаты поставщикам, здесь появится подробная таблица задолженности.</p>
+                <h3>Ничего не найдено</h3>
+                <p>Измените фильтры или добавьте закупки и оплаты поставщикам.</p>
             </div>
         {% endif %}
     </section>

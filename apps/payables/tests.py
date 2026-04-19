@@ -20,7 +20,9 @@ class SupplierBalancesViewTests(TestCase):
         self.client.force_login(self.user)
 
         self.store = Store.objects.create(name="Основной")
+        self.other_store = Store.objects.create(name="Резерв")
         self.supplier = Supplier.objects.create(name="Поставщик 1")
+        self.other_supplier = Supplier.objects.create(name="Поставщик 2")
         self.product = Product.objects.create(name="Товар 1")
 
     def test_supplier_balances_renders_and_allocates_general_payment_fifo(self):
@@ -63,6 +65,7 @@ class SupplierBalancesViewTests(TestCase):
         first_row, second_row = group["rows"]
         self.assertEqual(first_row["paid_amount"], Decimal("200.00"))
         self.assertEqual(second_row["paid_amount"], Decimal("50.00"))
+        self.assertIn("supplier=1", first_row["payment_url"])
 
         allocations = list(
             SupplierPaymentAllocation.objects.filter(payment=payment).values_list("purchase_id", "amount")
@@ -150,7 +153,62 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(specific_allocations, [(purchase_one.id, Decimal("50.00"))])
         self.assertEqual(general_allocations, [(purchase_one.id, Decimal("70.00")), (purchase_two.id, Decimal("30.00"))])
 
-    def test_supplier_payment_form_page_opens(self):
-        response = self.client.get(reverse("payables:supplier_payment_create"), HTTP_HOST="localhost")
+    def test_supplier_payment_form_page_opens_with_prefill(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+
+        response = self.client.get(
+            reverse("payables:supplier_payment_create"),
+            {"supplier": self.supplier.id, "store": self.store.id, "purchase": purchase.id},
+            HTTP_HOST="localhost",
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Новая оплата поставщику")
+        self.assertEqual(str(response.context["form"].initial["supplier"]), str(self.supplier.id))
+        self.assertEqual(str(response.context["form"].initial["store"]), str(self.store.id))
+        self.assertEqual(str(response.context["form"].initial["purchase"]), str(purchase.id))
+
+    def test_supplier_balance_filter_by_supplier_and_status(self):
+        unpaid_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        paid_purchase = Purchase.objects.create(supplier=self.other_supplier, date="2026-04-11")
+
+        PurchaseItem.objects.create(
+            purchase=unpaid_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            purchase_price_per_kg=Decimal("50.00"),
+        )
+        PurchaseItem.objects.create(
+            purchase=paid_purchase,
+            store=self.other_store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("70.00"),
+        )
+
+        SupplierPayment.objects.create(
+            supplier=self.other_supplier,
+            store=self.other_store,
+            purchase=paid_purchase,
+            date="2026-04-12",
+            amount=Decimal("70.00"),
+        )
+
+        response = self.client.get(
+            reverse("payables:supplier_balances"),
+            {"supplier": self.supplier.id, "status": "unpaid"},
+            HTTP_HOST="localhost",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["supplier_groups"]), 1)
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["supplier_name"], self.supplier.name)
+        self.assertEqual(len(group["rows"]), 1)
+        self.assertEqual(group["rows"][0]["status"], "Не оплачено")

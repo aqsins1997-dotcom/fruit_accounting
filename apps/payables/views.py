@@ -1,5 +1,6 @@
 from decimal import Decimal
 from functools import lru_cache
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -11,7 +12,7 @@ from django.utils import timezone
 
 from apps.inventory.models import PurchaseItem
 
-from .forms import SupplierPaymentCreateForm
+from .forms import SupplierBalanceFilterForm, SupplierPaymentCreateForm
 from .models import SupplierPayment, SupplierPaymentAllocation
 
 
@@ -27,10 +28,29 @@ def _existing_tables():
     return set(connection.introspection.table_names())
 
 
+def _build_payment_link(row):
+    query = {
+        "supplier": row["supplier_id"],
+        "store": row["store_id"],
+        "purchase": row["purchase_id"],
+    }
+    return f"/reports/suppliers/payments/add/?{urlencode(query)}"
+
+
 @login_required
 def supplier_payment_create(request):
+    supplier_id = request.GET.get("supplier") or None
+    store_id = request.GET.get("store") or None
+    purchase_id = request.GET.get("purchase") or None
+
+    form_kwargs = {
+        "supplier_id": supplier_id,
+        "store_id": store_id,
+        "purchase_id": purchase_id,
+    }
+
     if request.method == "POST":
-        form = SupplierPaymentCreateForm(request.POST)
+        form = SupplierPaymentCreateForm(request.POST, **form_kwargs)
         if form.is_valid():
             payment = form.save()
             messages.success(
@@ -39,7 +59,14 @@ def supplier_payment_create(request):
             )
             return redirect("payables:supplier_balances")
     else:
-        form = SupplierPaymentCreateForm(initial={"date": timezone.now().date()})
+        initial = {"date": timezone.now().date()}
+        if supplier_id:
+            initial["supplier"] = supplier_id
+        if store_id:
+            initial["store"] = store_id
+        if purchase_id:
+            initial["purchase"] = purchase_id
+        form = SupplierPaymentCreateForm(initial=initial, **form_kwargs)
 
     recent_payments = SupplierPayment.objects.select_related(
         "supplier",
@@ -56,15 +83,33 @@ def supplier_payment_create(request):
 
 @login_required
 def supplier_balances(request):
+    filter_form = SupplierBalanceFilterForm(request.GET if request.GET is not None else {})
+    filter_form.is_valid()
+
+    supplier = filter_form.cleaned_data.get("supplier")
+    store = filter_form.cleaned_data.get("store")
+    status_filter = filter_form.cleaned_data.get("status") or SupplierBalanceFilterForm.STATUS_ALL
+    date_from = filter_form.cleaned_data.get("date_from")
+    date_to = filter_form.cleaned_data.get("date_to")
+
     money_field = DecimalField(max_digits=14, decimal_places=2)
     line_total = ExpressionWrapper(
         F("quantity_kg") * F("purchase_price_per_kg"),
         output_field=money_field,
     )
 
+    purchase_items = PurchaseItem.objects.annotate(line_total=line_total)
+    if supplier:
+        purchase_items = purchase_items.filter(purchase__supplier=supplier)
+    if store:
+        purchase_items = purchase_items.filter(store=store)
+    if date_from:
+        purchase_items = purchase_items.filter(purchase__date__gte=date_from)
+    if date_to:
+        purchase_items = purchase_items.filter(purchase__date__lte=date_to)
+
     purchase_rows = list(
-        PurchaseItem.objects.annotate(line_total=line_total)
-        .values(
+        purchase_items.values(
             "purchase_id",
             "purchase__date",
             "store_id",
@@ -98,16 +143,14 @@ def supplier_balances(request):
             "remaining_amount": purchase_row["purchase_total"] or Decimal("0.00"),
             "status": "Не оплачено",
             "status_class": "badge--danger",
+            "payment_url": "",
         }
         rows.append(report_row)
         purchase_lookup[(report_row["purchase_id"], report_row["store_id"])] = report_row
         rows_by_group.setdefault((report_row["supplier_id"], report_row["store_id"]), []).append(report_row)
 
     allocation_table_exists = SupplierPaymentAllocation._meta.db_table in _existing_tables()
-    if allocation_table_exists:
-        allocation_columns = _table_columns(SupplierPaymentAllocation._meta.db_table)
-    else:
-        allocation_columns = set()
+    allocation_columns = _table_columns(SupplierPaymentAllocation._meta.db_table) if allocation_table_exists else set()
 
     if {"payment_id", "purchase_id", "store_id", "amount"}.issubset(allocation_columns):
         allocation_rows = SupplierPaymentAllocation.objects.values(
@@ -169,11 +212,7 @@ def supplier_balances(request):
                     target_row["remaining_amount"] -= applied
                     remaining_payment -= applied
 
-    supplier_groups_map = {}
-    total_purchases = Decimal("0.00")
-    total_payments = Decimal("0.00")
-    total_due = Decimal("0.00")
-
+    filtered_rows = []
     for row in rows:
         if row["remaining_amount"] <= 0:
             row["remaining_amount"] = Decimal("0.00")
@@ -183,6 +222,23 @@ def supplier_balances(request):
             row["status"] = "Частично оплачено"
             row["status_class"] = "badge--warning"
 
+        row["payment_url"] = _build_payment_link(row)
+
+        if status_filter == SupplierBalanceFilterForm.STATUS_UNPAID and row["status"] != "Не оплачено":
+            continue
+        if status_filter == SupplierBalanceFilterForm.STATUS_PARTIAL and row["status"] != "Частично оплачено":
+            continue
+        if status_filter == SupplierBalanceFilterForm.STATUS_PAID and row["status"] != "Оплачено":
+            continue
+
+        filtered_rows.append(row)
+
+    supplier_groups_map = {}
+    total_purchases = Decimal("0.00")
+    total_payments = Decimal("0.00")
+    total_due = Decimal("0.00")
+
+    for row in filtered_rows:
         total_purchases += row["purchase_total"]
         total_payments += row["paid_amount"]
         total_due += row["remaining_amount"]
@@ -209,6 +265,7 @@ def supplier_balances(request):
     )
 
     context = {
+        "filter_form": filter_form,
         "supplier_groups": supplier_groups,
         "summary": {
             "total_purchases": total_purchases,

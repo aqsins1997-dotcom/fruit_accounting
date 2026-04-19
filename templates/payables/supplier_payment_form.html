@@ -44,7 +44,7 @@
                 <label for="{{ form.purchase.id_for_label }}">Закупка</label>
                 {{ form.purchase }}
                 {% if form.purchase.help_text %}
-                    <div class="form-help">{{ form.purchase.help_text }}</div>
+                    <div class="page-subtitle" style="margin-top: 6px;">{{ form.purchase.help_text }}</div>
                 {% endif %}
                 {% if form.purchase.errors %}
                     <div class="message error">{{ form.purchase.errors|join:", " }}</div>
