@@ -9,6 +9,7 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
         "id",
         "store",
         "supplier",
+        "purchase",
         "date",
         "amount",
         "created_at",
@@ -16,12 +17,14 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
     list_filter = (
         "store",
         "supplier",
+        "purchase",
         "date",
         "created_at",
     )
     search_fields = (
         "store__name",
         "supplier__name",
+        "purchase__id",
         "comment",
     )
     date_hierarchy = "date"

@@ -1,7 +1,10 @@
 asgiref==3.11.1
+dj-database-url
 Django==5.2.13
 gunicorn==25.3.0
 packaging==26.1
+psycopg2-binary
+python-dotenv
 sqlparse==0.5.5
 tzdata==2026.1
 whitenoise==6.12.0

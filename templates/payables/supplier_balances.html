@@ -1,74 +1,111 @@
 {% extends "base.html" %}
 
-{% block title %}Поставщики{% endblock %}
-{% block page_title %}Расчеты с поставщиками{% endblock %}
-{% block page_subtitle %}Сколько закупили, сколько оплатили и сколько должны по каждому магазину{% endblock %}
+{% block title %}Долги поставщикам{% endblock %}
+{% block page_title %}Долги поставщикам{% endblock %}
+{% block page_subtitle %}Подробный расчет по закупкам, оплатам и остаткам{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
     <section class="grid grid--3">
         <div class="stat-card">
             <div class="stat-card__label">Закуплено всего</div>
-            <div class="stat-card__value">{{ summary.total_purchases }}</div>
-            <div class="stat-card__meta">Сумма всех закупок</div>
+            <div class="stat-card__value">{{ summary.total_purchases|floatformat:2 }}</div>
+            <div class="stat-card__meta">Сумма всех закупок поставщиков</div>
         </div>
 
         <div class="stat-card">
-            <div class="stat-card__label">Оплачено поставщикам</div>
-            <div class="stat-card__value">{{ summary.total_payments }}</div>
-            <div class="stat-card__meta">Сумма всех оплат</div>
+            <div class="stat-card__label">Уже оплачено</div>
+            <div class="stat-card__value">{{ summary.total_payments|floatformat:2 }}</div>
+            <div class="stat-card__meta">Сумма всех оплат поставщикам</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-card__label">Общий долг</div>
-            <div class="stat-card__value">{{ summary.total_due }}</div>
-            <div class="stat-card__meta">Остаток задолженности</div>
+            <div class="stat-card__value">{{ summary.total_due|floatformat:2 }}</div>
+            <div class="stat-card__meta">Остаток к оплате по всем поставщикам</div>
         </div>
     </section>
 
     <section class="card">
-        <h3 class="card__title">Расчеты по магазинам и поставщикам</h3>
-        <p class="card__subtitle">Здесь видно, сколько каждый магазин должен каждому поставщику</p>
-
-        <div class="quick-actions" style="margin-bottom: 18px;">
-            <a href="/admin/payables/supplierpayment/add/" class="btn btn--primary">Добавить оплату поставщику</a>
-            <a href="/admin/payables/supplierpayment/" class="btn">Список оплат</a>
+        <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px;">
+            <div>
+                <h3 class="card__title">Детализация задолженности</h3>
+                <p class="card__subtitle">Показывает каждого поставщика, закупки, магазины, оплаты и остаток долга.</p>
+            </div>
+            <div class="quick-actions">
+                <a href="/admin/payables/supplierpayment/add/" class="btn btn--primary">Добавить оплату</a>
+                <a href="/admin/payables/supplierpayment/" class="btn">Список оплат</a>
+            </div>
         </div>
 
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Магазин</th>
-                        <th>Поставщик</th>
-                        <th>Закуплено</th>
-                        <th>Оплачено</th>
-                        <th>Долг</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in rows %}
-                    <tr>
-                        <td>{{ row.store_name }}</td>
-                        <td>{{ row.supplier_name }}</td>
-                        <td>{{ row.purchases_total }}</td>
-                        <td>{{ row.payments_total }}</td>
-                        <td>
-                            {% if row.due_amount > 0 %}
-                                <span class="badge badge--warning">{{ row.due_amount }}</span>
-                            {% else %}
-                                <span class="badge badge--success">{{ row.due_amount }}</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="5">Пока нет данных по расчетам с поставщиками.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        {% if supplier_groups %}
+            {% for group in supplier_groups %}
+            <section class="card" style="margin-bottom: 18px;">
+                <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;">
+                    <div>
+                        <h4 class="card__title" style="margin-bottom: 6px;">{{ group.supplier_name }}</h4>
+                        <p class="card__subtitle">
+                            Закуплено {{ group.purchase_total|floatformat:2 }},
+                            оплачено {{ group.paid_amount|floatformat:2 }},
+                            осталось {{ group.remaining_amount|floatformat:2 }}
+                        </p>
+                    </div>
+                    <div>
+                        {% if group.remaining_amount > 0 %}
+                            <span class="badge badge--warning">Долг {{ group.remaining_amount|floatformat:2 }}</span>
+                        {% else %}
+                            <span class="badge badge--success">Все оплачено</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Поставщик</th>
+                                <th>Магазин</th>
+                                <th>Закупка</th>
+                                <th>Дата закупки</th>
+                                <th>Сумма закупки</th>
+                                <th>Оплачено</th>
+                                <th>Осталось</th>
+                                <th>Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in group.rows %}
+                            <tr>
+                                <td>{{ row.supplier_name|default:"-" }}</td>
+                                <td>{{ row.store_name|default:"-" }}</td>
+                                <td>Закупка №{{ row.purchase_id }}</td>
+                                <td>{{ row.purchase_date|date:"d.m.Y"|default:"-" }}</td>
+                                <td>{{ row.purchase_total|floatformat:2 }}</td>
+                                <td>{{ row.paid_amount|floatformat:2 }}</td>
+                                <td>{{ row.remaining_amount|floatformat:2 }}</td>
+                                <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th colspan="4">Итого по поставщику</th>
+                                <th>{{ group.purchase_total|floatformat:2 }}</th>
+                                <th>{{ group.paid_amount|floatformat:2 }}</th>
+                                <th>{{ group.remaining_amount|floatformat:2 }}</th>
+                                <th></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </section>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <h3>Долгов поставщикам пока нет</h3>
+                <p>Когда появятся закупки или оплаты поставщикам, здесь появится подробная таблица задолженности.</p>
+            </div>
+        {% endif %}
     </section>
 </section>
 {% endblock %}
