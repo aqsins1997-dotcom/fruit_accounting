@@ -1,15 +1,18 @@
 from decimal import Decimal
 from functools import lru_cache
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from apps.inventory.models import PurchaseItem
 
-from .models import SupplierPayment
+from .forms import SupplierPaymentCreateForm
+from .models import SupplierPayment, SupplierPaymentAllocation
 
 
 @lru_cache(maxsize=None)
@@ -17,6 +20,38 @@ def _table_columns(table_name):
     with connection.cursor() as cursor:
         description = connection.introspection.get_table_description(cursor, table_name)
     return {column.name for column in description}
+
+
+@lru_cache(maxsize=1)
+def _existing_tables():
+    return set(connection.introspection.table_names())
+
+
+@login_required
+def supplier_payment_create(request):
+    if request.method == "POST":
+        form = SupplierPaymentCreateForm(request.POST)
+        if form.is_valid():
+            payment = form.save()
+            messages.success(
+                request,
+                f"Оплата поставщику сохранена: {payment.supplier} / {payment.amount}.",
+            )
+            return redirect("payables:supplier_balances")
+    else:
+        form = SupplierPaymentCreateForm(initial={"date": timezone.now().date()})
+
+    recent_payments = SupplierPayment.objects.select_related(
+        "supplier",
+        "store",
+        "purchase",
+    )[:10]
+
+    context = {
+        "form": form,
+        "recent_payments": recent_payments,
+    }
+    return render(request, "payables/supplier_payment_form.html", context)
 
 
 @login_required
@@ -46,24 +81,6 @@ def supplier_balances(request):
         .order_by("purchase__supplier__name", "store__name", "purchase__date", "purchase_id")
     )
 
-    payment_value_fields = [
-        "id",
-        "supplier_id",
-        "supplier__name",
-        "store_id",
-        "store__name",
-        "date",
-        "amount",
-    ]
-    payment_columns = _table_columns(SupplierPayment._meta.db_table)
-    has_purchase_column = "purchase_id" in payment_columns
-    if has_purchase_column:
-        payment_value_fields.append("purchase_id")
-
-    payment_rows = list(
-        SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id")
-    )
-
     rows = []
     purchase_lookup = {}
     rows_by_group = {}
@@ -86,34 +103,71 @@ def supplier_balances(request):
         purchase_lookup[(report_row["purchase_id"], report_row["store_id"])] = report_row
         rows_by_group.setdefault((report_row["supplier_id"], report_row["store_id"]), []).append(report_row)
 
-    for payment_row in payment_rows:
-        remaining_payment = payment_row["amount"] or Decimal("0.00")
-        if remaining_payment <= 0:
-            continue
+    allocation_table_exists = SupplierPaymentAllocation._meta.db_table in _existing_tables()
+    if allocation_table_exists:
+        allocation_columns = _table_columns(SupplierPaymentAllocation._meta.db_table)
+    else:
+        allocation_columns = set()
 
-        purchase_id = payment_row.get("purchase_id")
+    if {"payment_id", "purchase_id", "store_id", "amount"}.issubset(allocation_columns):
+        allocation_rows = SupplierPaymentAllocation.objects.values(
+            "payment_id",
+            "purchase_id",
+            "store_id",
+            "amount",
+        )
+        for allocation_row in allocation_rows:
+            target_row = purchase_lookup.get((allocation_row["purchase_id"], allocation_row["store_id"]))
+            if not target_row:
+                continue
+            applied = allocation_row["amount"] or Decimal("0.00")
+            target_row["paid_amount"] += applied
+            target_row["remaining_amount"] -= applied
+    else:
+        payment_value_fields = [
+            "id",
+            "supplier_id",
+            "supplier__name",
+            "store_id",
+            "store__name",
+            "date",
+            "amount",
+        ]
+        payment_columns = _table_columns(SupplierPayment._meta.db_table)
+        if "purchase_id" in payment_columns:
+            payment_value_fields.append("purchase_id")
 
-        if purchase_id:
-            purchase_key = (purchase_id, payment_row["store_id"])
-            target_row = purchase_lookup.get(purchase_key)
-            if target_row:
-                applied = min(target_row["remaining_amount"], remaining_payment)
-                target_row["paid_amount"] += applied
-                target_row["remaining_amount"] -= applied
-                remaining_payment -= applied
+        payment_rows = list(
+            SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id")
+        )
 
-        if remaining_payment > 0:
-            group_key = (payment_row["supplier_id"], payment_row["store_id"])
-            for target_row in rows_by_group.get(group_key, []):
-                if remaining_payment <= 0:
-                    break
-                if target_row["remaining_amount"] <= 0:
-                    continue
+        for payment_row in payment_rows:
+            remaining_payment = payment_row["amount"] or Decimal("0.00")
+            if remaining_payment <= 0:
+                continue
 
-                applied = min(target_row["remaining_amount"], remaining_payment)
-                target_row["paid_amount"] += applied
-                target_row["remaining_amount"] -= applied
-                remaining_payment -= applied
+            purchase_id = payment_row.get("purchase_id")
+            if purchase_id:
+                purchase_key = (purchase_id, payment_row["store_id"])
+                target_row = purchase_lookup.get(purchase_key)
+                if target_row:
+                    applied = min(target_row["remaining_amount"], remaining_payment)
+                    target_row["paid_amount"] += applied
+                    target_row["remaining_amount"] -= applied
+                    remaining_payment -= applied
+
+            if remaining_payment > 0:
+                group_key = (payment_row["supplier_id"], payment_row["store_id"])
+                for target_row in rows_by_group.get(group_key, []):
+                    if remaining_payment <= 0:
+                        break
+                    if target_row["remaining_amount"] <= 0:
+                        continue
+
+                    applied = min(target_row["remaining_amount"], remaining_payment)
+                    target_row["paid_amount"] += applied
+                    target_row["remaining_amount"] -= applied
+                    remaining_payment -= applied
 
     supplier_groups_map = {}
     total_purchases = Decimal("0.00")

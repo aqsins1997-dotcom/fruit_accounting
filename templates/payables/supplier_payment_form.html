@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Оплата поставщику{% endblock %}
+{% block page_title %}Новая оплата поставщику{% endblock %}
+{% block page_subtitle %}Добавление оплаты без админки с возможностью привязать платеж к закупке{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Что делает форма</div>
+            <div class="stat-card__value">Оплата поставщику</div>
+            <div class="stat-card__meta">Можно указать конкретную закупку или оставить оплату общей.</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Как распределяется</div>
+            <div class="stat-card__value">FIFO</div>
+            <div class="stat-card__meta">Общие платежи автоматически закрывают более ранние закупки.</div>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Параметры оплаты</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+
+            <div class="form-group">
+                <label for="{{ form.supplier.id_for_label }}">Поставщик</label>
+                {{ form.supplier }}
+                {% if form.supplier.errors %}
+                    <div class="message error">{{ form.supplier.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.store.id_for_label }}">Магазин</label>
+                {{ form.store }}
+                {% if form.store.errors %}
+                    <div class="message error">{{ form.store.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.purchase.id_for_label }}">Закупка</label>
+                {{ form.purchase }}
+                {% if form.purchase.help_text %}
+                    <div class="form-help">{{ form.purchase.help_text }}</div>
+                {% endif %}
+                {% if form.purchase.errors %}
+                    <div class="message error">{{ form.purchase.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.date.id_for_label }}">Дата</label>
+                {{ form.date }}
+                {% if form.date.errors %}
+                    <div class="message error">{{ form.date.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.amount.id_for_label }}">Сумма</label>
+                {{ form.amount }}
+                {% if form.amount.errors %}
+                    <div class="message error">{{ form.amount.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group form-group--full">
+                <label for="{{ form.comment.id_for_label }}">Комментарий</label>
+                {{ form.comment }}
+                {% if form.comment.errors %}
+                    <div class="message error">{{ form.comment.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+
+            <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn--primary">Сохранить оплату</button>
+                <a href="{% url 'payables:supplier_balances' %}" class="btn">Назад к долгам поставщиков</a>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Последние оплаты</h3>
+        {% if recent_payments %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Поставщик</th>
+                            <th>Магазин</th>
+                            <th>Закупка</th>
+                            <th>Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in recent_payments %}
+                        <tr>
+                            <td>{{ payment.date|date:"d.m.Y" }}</td>
+                            <td>{{ payment.supplier.name }}</td>
+                            <td>{{ payment.store.name }}</td>
+                            <td>{% if payment.purchase_id %}№{{ payment.purchase_id }}{% else %}-{% endif %}</td>
+                            <td>{{ payment.amount|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Оплат пока нет</h3>
+                <p>После сохранения платежей здесь появятся последние операции.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

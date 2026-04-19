@@ -44,7 +44,8 @@
 
             <div class="nav-section">
                 <div class="nav-section__title">Поставщики</div>
-                <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги поставщикам</a>
+                <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги по поставщикам</a>
+                <a href="{% url 'payables:supplier_payment_create' %}" class="nav-link">Новая оплата поставщику</a>
                 <a href="/admin/payables/supplierpayment/" class="nav-link">Оплаты поставщикам</a>
             </div>
 
