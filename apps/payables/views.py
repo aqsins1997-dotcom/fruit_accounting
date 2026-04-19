@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.decorators import login_required
+from django.db import connection
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import render
@@ -8,6 +9,12 @@ from django.shortcuts import render
 from apps.inventory.models import PurchaseItem
 
 from .models import SupplierPayment
+
+
+def _table_columns(table_name):
+    with connection.cursor() as cursor:
+        description = connection.introspection.get_table_description(cursor, table_name)
+    return {column.name for column in description}
 
 
 @login_required
@@ -37,17 +44,22 @@ def supplier_balances(request):
         .order_by("purchase__supplier__name", "store__name", "purchase__date", "purchase_id")
     )
 
+    payment_value_fields = [
+        "id",
+        "supplier_id",
+        "supplier__name",
+        "store_id",
+        "store__name",
+        "date",
+        "amount",
+    ]
+    payment_columns = _table_columns(SupplierPayment._meta.db_table)
+    has_purchase_column = "purchase_id" in payment_columns
+    if has_purchase_column:
+        payment_value_fields.append("purchase_id")
+
     payment_rows = list(
-        SupplierPayment.objects.values(
-            "id",
-            "supplier_id",
-            "supplier__name",
-            "store_id",
-            "store__name",
-            "purchase_id",
-            "date",
-            "amount",
-        ).order_by("date", "id")
+        SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id")
     )
 
     rows = []
@@ -77,8 +89,10 @@ def supplier_balances(request):
         if remaining_payment <= 0:
             continue
 
-        if payment_row["purchase_id"]:
-            purchase_key = (payment_row["purchase_id"], payment_row["store_id"])
+        purchase_id = payment_row.get("purchase_id")
+
+        if purchase_id:
+            purchase_key = (purchase_id, payment_row["store_id"])
             target_row = purchase_lookup.get(purchase_key)
             if target_row:
                 applied = min(target_row["remaining_amount"], remaining_payment)
