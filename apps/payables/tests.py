@@ -212,3 +212,24 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(group["supplier_name"], self.supplier.name)
         self.assertEqual(len(group["rows"]), 1)
         self.assertEqual(group["rows"][0]["status"], "Не оплачено")
+
+    def test_supplier_payment_history_page_renders(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            purchase_price_per_kg=Decimal("50.00"),
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-11",
+            amount=Decimal("40.00"),
+        )
+
+        response = self.client.get(reverse("payables:supplier_payment_list"), HTTP_HOST="localhost")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.supplier.name)

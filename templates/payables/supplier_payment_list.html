@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Оплаты поставщикам{% endblock %}
+{% block page_title %}История оплат поставщикам{% endblock %}
+{% block page_subtitle %}Все платежи поставщикам и их распределение по закупкам{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card">
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'payables:supplier_payment_create' %}" class="btn btn--primary">Новая оплата поставщику</a>
+            <a href="{% url 'payables:supplier_balances' %}" class="btn">Назад к долгам</a>
+        </div>
+
+        {% if payments %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Поставщик</th>
+                            <th>Магазин</th>
+                            <th>Закупка</th>
+                            <th>Сумма</th>
+                            <th>Распределение</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in payments %}
+                        <tr>
+                            <td>{{ payment.date|date:"d.m.Y" }}</td>
+                            <td>{{ payment.supplier.name }}</td>
+                            <td>{{ payment.store.name }}</td>
+                            <td>{% if payment.purchase_id %}№{{ payment.purchase_id }}{% else %}Общая оплата{% endif %}</td>
+                            <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>
+                                {% for allocation in payment.allocations.all %}
+                                    <div>Закупка №{{ allocation.purchase_id }}: {{ allocation.amount|floatformat:2 }}</div>
+                                {% empty %}
+                                    <span class="page-subtitle">Пока без распределения</span>
+                                {% endfor %}
+                            </td>
+                            <td>{{ payment.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Оплат пока нет</h3>
+                <p>Когда вы добавите платежи поставщикам, они появятся здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

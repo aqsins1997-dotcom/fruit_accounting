@@ -53,10 +53,7 @@ def supplier_payment_create(request):
         form = SupplierPaymentCreateForm(request.POST, **form_kwargs)
         if form.is_valid():
             payment = form.save()
-            messages.success(
-                request,
-                f"Оплата поставщику сохранена: {payment.supplier} / {payment.amount}.",
-            )
+            messages.success(request, f"Оплата поставщику сохранена: {payment.supplier} / {payment.amount}.")
             return redirect("payables:supplier_balances")
     else:
         initial = {"date": timezone.now().date()}
@@ -68,17 +65,22 @@ def supplier_payment_create(request):
             initial["purchase"] = purchase_id
         form = SupplierPaymentCreateForm(initial=initial, **form_kwargs)
 
-    recent_payments = SupplierPayment.objects.select_related(
-        "supplier",
-        "store",
-        "purchase",
-    )[:10]
-
+    recent_payments = SupplierPayment.objects.select_related("supplier", "store", "purchase")[:10]
     context = {
         "form": form,
         "recent_payments": recent_payments,
     }
     return render(request, "payables/supplier_payment_form.html", context)
+
+
+@login_required
+def supplier_payment_list(request):
+    payments = (
+        SupplierPayment.objects.select_related("supplier", "store", "purchase")
+        .prefetch_related("allocations")
+        .order_by("-date", "-id")
+    )
+    return render(request, "payables/supplier_payment_list.html", {"payments": payments})
 
 
 @login_required
@@ -180,9 +182,7 @@ def supplier_balances(request):
         if "purchase_id" in payment_columns:
             payment_value_fields.append("purchase_id")
 
-        payment_rows = list(
-            SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id")
-        )
+        payment_rows = list(SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id"))
 
         for payment_row in payment_rows:
             remaining_payment = payment_row["amount"] or Decimal("0.00")

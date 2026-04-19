@@ -30,6 +30,7 @@
         <h3 class="card__title">Магазины и текущий долг</h3>
         <div class="quick-actions" style="margin-bottom: 18px;">
             <a href="{% url 'reports:debtor_detail_print' customer.id %}" class="btn btn--primary" target="_blank" rel="noopener">Печать карточки</a>
+            <a href="{% url 'credits:credit_payment_list' %}" class="btn">Все оплаты клиентов</a>
             <a href="{% url 'reports:debtors_report' %}" class="btn">Назад к списку</a>
         </div>
 

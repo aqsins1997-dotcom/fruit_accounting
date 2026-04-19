@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Остатки{% endblock %}
+{% block page_title %}Остатки товаров{% endblock %}
+{% block page_subtitle %}Текущие остатки по магазинам{% endblock %}
+
+{% block content %}
+<section class="card">
+    {% if stocks %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Магазин</th>
+                        <th>Товар</th>
+                        <th>Количество</th>
+                        <th>Средняя закупочная цена</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                    <tr>
+                        <td>{{ stock.store.name }}</td>
+                        <td>{{ stock.product.name }}</td>
+                        <td>{{ stock.quantity_kg }}</td>
+                        <td>{{ stock.average_purchase_price|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state"><h3>Остатков пока нет</h3></div>
+    {% endif %}
+</section>
+{% endblock %}

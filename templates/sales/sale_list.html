@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Продажи{% endblock %}
+{% block page_title %}Продажи{% endblock %}
+{% block page_subtitle %}Просмотр продаж и кассы без админки{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card">
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'sales:sale_create' %}" class="btn btn--primary">Новая продажа</a>
+        </div>
+        {% if sales %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>№</th>
+                            <th>Дата</th>
+                            <th>Магазин</th>
+                            <th>Тип оплаты</th>
+                            <th>Клиент</th>
+                            <th>Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sale in sales %}
+                        <tr>
+                            <td>{{ sale.id }}</td>
+                            <td>{{ sale.date|date:"d.m.Y" }}</td>
+                            <td>{{ sale.store.name }}</td>
+                            <td>{{ sale.get_payment_type_display }}</td>
+                            <td>{{ sale.customer|default:"-" }}</td>
+                            <td>{{ sale.total_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state"><h3>Продаж пока нет</h3></div>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Кассы магазинов</h3>
+        {% if cash_registers %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Баланс кассы</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for register in cash_registers %}
+                        <tr>
+                            <td>{{ register.store.name }}</td>
+                            <td>{{ register.balance|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state"><h3>Касс пока нет</h3></div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

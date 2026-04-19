@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Новая закупка{% endblock %}
+{% block page_title %}Новая закупка{% endblock %}
+{% block page_subtitle %}Оформление закупки и первой строки товара без админки{% endblock %}
+
+{% block content %}
+<section class="grid grid--2" style="gap: 24px;">
+    <section class="card form-card">
+        <h3 class="card__title">Параметры закупки</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% for field in purchase_form %}
+                <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            {% for field in item_form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Сохранить закупку</button>
+            </div>
+        </form>
+    </section>
+</section>
+{% endblock %}

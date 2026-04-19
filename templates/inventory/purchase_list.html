@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Закупки{% endblock %}
+{% block page_title %}Закупки{% endblock %}
+{% block page_subtitle %}Просмотр закупок без админки{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="quick-actions" style="margin-bottom: 18px;">
+        <a href="{% url 'inventory:purchase_create' %}" class="btn btn--primary">Новая закупка</a>
+    </div>
+    {% if purchases %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Дата</th>
+                        <th>Поставщик</th>
+                        <th>Строки</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for purchase in purchases %}
+                    <tr>
+                        <td>{{ purchase.id }}</td>
+                        <td>{{ purchase.date|date:"d.m.Y" }}</td>
+                        <td>{{ purchase.supplier.name }}</td>
+                        <td>
+                            {% for item in purchase.items.all %}
+                                <div>{{ item.store }} / {{ item.product }} / {{ item.quantity_kg }} кг / {{ item.purchase_price_per_kg }}</div>
+                            {% empty %}
+                                -
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state"><h3>Закупок пока нет</h3></div>
+    {% endif %}
+</section>
+{% endblock %}

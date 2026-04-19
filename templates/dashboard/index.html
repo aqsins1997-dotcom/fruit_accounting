@@ -2,15 +2,15 @@
 
 {% block title %}Дашборд{% endblock %}
 {% block page_title %}Дашборд{% endblock %}
-{% block page_subtitle %}Общая статистика бизнеса{% endblock %}
+{% block page_subtitle %}Общая статистика и быстрый доступ ко всем рабочим разделам{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
     <section class="hero">
-        <h2 class="hero__title">Панель управления фруктовым бизнесом</h2>
+        <h2 class="hero__title">Рабочий кабинет учета торговли</h2>
         <p class="hero__text">
-            Здесь отображается общая картина по магазинам, товарам, остаткам и продажам.
-            Дальше сюда подключим кредиты, платежи, ежедневные отчеты и аналитику по прибыли.
+            Здесь собраны ключевые показатели по товарам, остаткам и продажам, а ниже вынесены быстрые переходы
+            в не-админские рабочие разделы: закупки, продажи, долги клиентов и долги поставщикам.
         </p>
     </section>
 
@@ -18,7 +18,7 @@
         <div class="stat-card">
             <div class="stat-card__label">Магазины</div>
             <div class="stat-card__value">{{ stats.stores_count }}</div>
-            <div class="stat-card__meta">Всего активных точек</div>
+            <div class="stat-card__meta">Всего точек</div>
         </div>
 
         <div class="stat-card">
@@ -43,19 +43,19 @@
     <section class="grid grid--2">
         <div class="card">
             <h3 class="card__title">Быстрые действия</h3>
-            <p class="card__subtitle">Переход к основным разделам</p>
+            <p class="card__subtitle">Основные рабочие операции без админки</p>
 
             <div class="quick-actions">
-                <a href="/admin/inventory/purchase/add/" class="btn btn--primary">Новая закупка</a>
-                <a href="/admin/inventory/storestock/" class="btn">Остатки</a>
-                <a href="/admin/sales/sale/add/" class="btn btn--success">Новая продажа</a>
-                <a href="/admin/" class="btn">Админка</a>
+                <a href="{% url 'inventory:purchase_create' %}" class="btn btn--primary">Новая закупка</a>
+                <a href="{% url 'sales:sale_create' %}" class="btn btn--success">Новая продажа</a>
+                <a href="{% url 'payables:supplier_payment_create' %}" class="btn">Оплата поставщику</a>
+                <a href="{% url 'reports:debtors_report' %}" class="btn">Долги клиентов</a>
             </div>
         </div>
 
         <div class="card">
-            <h3 class="card__title">Статус проекта</h3>
-            <p class="card__subtitle">Текущее состояние системы</p>
+            <h3 class="card__title">Что уже доступно</h3>
+            <p class="card__subtitle">Основной поток работы закрыт без админки</p>
 
             <div class="kpi-row">
                 <span class="kpi-row__label">Справочники</span>
@@ -67,39 +67,43 @@
             </div>
             <div class="kpi-row">
                 <span class="kpi-row__label">Продажи</span>
-                <span class="badge badge--warning">В процессе</span>
+                <span class="badge badge--success">Работает</span>
             </div>
             <div class="kpi-row">
-                <span class="kpi-row__label">Кредиты</span>
-                <span class="badge badge--info">Следующий этап</span>
+                <span class="kpi-row__label">Кредиты клиентов</span>
+                <span class="badge badge--success">Работает</span>
+            </div>
+            <div class="kpi-row">
+                <span class="kpi-row__label">Долги поставщикам</span>
+                <span class="badge badge--success">Работает</span>
             </div>
         </div>
     </section>
 
     <section class="grid grid--2">
         <div class="card">
-            <h3 class="card__title">Магазин 1</h3>
-            <p class="card__subtitle">Будущий отчет по первой точке</p>
+            <h3 class="card__title">Рабочие разделы</h3>
+            <p class="card__subtitle">Переход к ежедневным задачам</p>
 
             <ul class="list-clean">
-                <li>Продажи за день</li>
-                <li>Продажи за наличные</li>
-                <li>Продажи в кредит</li>
-                <li>Список должников</li>
-                <li>Остатки на конец дня</li>
+                <li><a href="{% url 'inventory:purchase_list' %}">Закупки</a></li>
+                <li><a href="{% url 'inventory:stock_list' %}">Остатки</a></li>
+                <li><a href="{% url 'sales:sale_list' %}">Продажи и касса</a></li>
+                <li><a href="{% url 'reports:daily_store_report' %}">Ежедневный отчет по магазину</a></li>
+                <li><a href="{% url 'reports:debtors_report' %}">Должники</a></li>
             </ul>
         </div>
 
         <div class="card">
-            <h3 class="card__title">Магазин 2</h3>
-            <p class="card__subtitle">Будущий отчет по второй точке</p>
+            <h3 class="card__title">Финансовые разделы</h3>
+            <p class="card__subtitle">Контроль долгов и оплат</p>
 
             <ul class="list-clean">
-                <li>Продажи за день</li>
-                <li>Продажи за наличные</li>
-                <li>Продажи в кредит</li>
-                <li>Список должников</li>
-                <li>Остатки на конец дня</li>
+                <li><a href="{% url 'payables:supplier_balances' %}">Долги поставщикам</a></li>
+                <li><a href="{% url 'payables:supplier_payment_list' %}">История оплат поставщикам</a></li>
+                <li><a href="{% url 'credits:credit_payment_list' %}">История оплат клиентов</a></li>
+                <li><a href="{% url 'core:suppliers_page' %}">Поставщики</a></li>
+                <li><a href="{% url 'core:customers_page' %}">Клиенты</a></li>
             </ul>
         </div>
     </section>

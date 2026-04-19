@@ -61,11 +61,11 @@
         <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px;">
             <div>
                 <h3 class="card__title">Детализация задолженности</h3>
-                <p class="card__subtitle">Показывает каждого поставщика, закупки, магазины, оплаты и остаток долга.</p>
+                <p class="card__subtitle">Показывает поставщика, закупки, магазины, оплаты и остаток долга.</p>
             </div>
             <div class="quick-actions">
                 <a href="{% url 'payables:supplier_payment_create' %}" class="btn btn--primary">Новая оплата поставщику</a>
-                <a href="/admin/payables/supplierpayment/" class="btn">Все оплаты</a>
+                <a href="{% url 'payables:supplier_payment_list' %}" class="btn">Все оплаты</a>
             </div>
         </div>
 

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Оплаты клиентов{% endblock %}
+{% block page_title %}История оплат клиентов{% endblock %}
+{% block page_subtitle %}Все платежи по клиентским долгам без админки{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card">
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'reports:debtors_report' %}" class="btn">К списку должников</a>
+        </div>
+
+        {% if payments %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Клиент</th>
+                            <th>Магазин</th>
+                            <th>Кредит</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in payments %}
+                        <tr>
+                            <td>{{ payment.date|date:"d.m.Y" }}</td>
+                            <td>{{ payment.credit.customer.name }}</td>
+                            <td>{{ payment.credit.store.name }}</td>
+                            <td>#{{ payment.credit_id }}</td>
+                            <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>{{ payment.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Оплат пока нет</h3>
+                <p>После погашений клиентских долгов история появится здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

@@ -1,93 +1,40 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
 {% block title %}Главная | Fruit Accounting{% endblock %}
+{% block page_title %}Рабочее пространство{% endblock %}
+{% block page_subtitle %}Быстрый обзор системы и доступ к ежедневным операциям{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <h2>Панель управления бизнесом</h2>
-    <p>
-        Здесь будет центральная точка работы с закупками, остатками, продажами,
-        кредитами и отчетами. Сейчас это уже рабочая база системы, которую мы
-        будем постепенно превращать в полноценную программу для твоего бизнеса.
-    </p>
+<section class="grid" style="gap: 24px;">
+    <section class="hero">
+        <h2>Учет торговли без лишних переходов</h2>
+        <p>
+            Вся основная работа теперь доступна без админки: можно вести справочники, оформлять закупки и продажи,
+            контролировать остатки, смотреть долги клиентов и долги поставщикам.
+        </p>
+    </section>
+
+    <section class="grid grid--3">
+        {% for section in sections %}
+        <article class="card">
+            <h3 class="card__title">{{ section.title }}</h3>
+            <ul class="list-clean">
+                {% for item in section.items %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </article>
+        {% endfor %}
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Быстрые переходы</h3>
+        <div class="quick-actions">
+            <a class="btn btn--primary" href="{% url 'inventory:purchase_create' %}">Новая закупка</a>
+            <a class="btn btn--success" href="{% url 'sales:sale_create' %}">Новая продажа</a>
+            <a class="btn" href="{% url 'payables:supplier_payment_create' %}">Оплата поставщику</a>
+            <a class="btn" href="{% url 'reports:debtors_report' %}">Должники</a>
+        </div>
+    </section>
 </section>
-
-<section class="stats">
-    <div class="stat-card">
-        <div class="label">Статус проекта</div>
-        <div class="value">Работает</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Складской модуль</div>
-        <div class="value">Готов</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Следующий этап</div>
-        <div class="value">Продажи</div>
-    </div>
-</section>
-
-<section class="grid">
-    <article class="card">
-        <h3>Справочники</h3>
-        <p>Базовые сущности бизнеса, на которых держится вся система.</p>
-        <ul>
-            <li>Поставщики</li>
-            <li>Товары</li>
-            <li>Магазины</li>
-            <li>Продавцы</li>
-            <li>Клиенты</li>
-        </ul>
-    </article>
-
-    <article class="card">
-        <h3>Склад</h3>
-        <p>Учет прихода товара, распределения по магазинам и текущих остатков.</p>
-        <ul>
-            <li>Закупки у поставщиков</li>
-            <li>Строки закупок</li>
-            <li>Распределения по магазинам</li>
-            <li>Остатки магазинов</li>
-            <li>Движения товара</li>
-        </ul>
-    </article>
-
-    <article class="card">
-        <h3>Что дальше</h3>
-        <p>Следующим шагом добавим продажи и долги, чтобы система стала полезной в ежедневной работе.</p>
-        <ul>
-            <li>Продажи за наличные</li>
-            <li>Продажи в кредит</li>
-            <li>Учет долгов</li>
-            <li>Оплаты по кредитам</li>
-            <li>Простые отчеты</li>
-        </ul>
-    </article>
-</section>
-
-<section class="quick-links">
-    <a class="quick-link" href="/admin/">
-        <strong>Открыть админку</strong>
-        <span>Управление данными и справочниками</span>
-    </a>
-
-    <a class="quick-link" href="/admin/inventory/purchase/">
-        <strong>Перейти к закупкам</strong>
-        <span>Создание приходов от поставщиков</span>
-    </a>
-
-    <a class="quick-link" href="/admin/inventory/storetransfer/">
-        <strong>Распределение товара</strong>
-        <span>Передача товара в конкретный магазин</span>
-    </a>
-
-    <a class="quick-link" href="/admin/inventory/storestock/">
-        <strong>Смотреть остатки</strong>
-        <span>Текущие остатки по магазинам</span>
-    </a>
-</section>
-
-<p class="footer-note">
-    Текущая версия — рабочий MVP. Дальше добавим продажи, кредиты и нормальные отчеты.
-</p>
 {% endblock %}

@@ -20,6 +20,9 @@ urlpatterns = [
     path("mobile/debtors/<int:credit_id>/pay/", mobile_credit_payment_add, name="mobile_credit_payment_add_root"),
     path("mobile/sales/add/", mobile_sale_add, name="mobile_sale_add_root"),
     path("credits/", include("apps.credits.urls")),
+    path("", include("apps.core.urls")),
+    path("", include("apps.inventory.urls")),
+    path("", include("apps.sales.urls")),
     path("reports/", include("apps.reports.urls")),
     path("reports/", include("apps.payables.urls")),
 

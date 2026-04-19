@@ -4,7 +4,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .forms import CreditPaymentCreateForm
-from .models import Credit
+from .models import Credit, CreditPayment
 
 
 @login_required
@@ -24,12 +24,19 @@ def credit_payment_create(request, credit_id):
             messages.success(request, "Оплата успешно сохранена.")
             return redirect("reports:debtor_detail", customer_id=credit.customer_id)
     else:
-        form = CreditPaymentCreateForm(
-            initial={"date": timezone.now().date()}
-        )
+        form = CreditPaymentCreateForm(initial={"date": timezone.now().date()})
 
     context = {
         "credit": credit,
         "form": form,
     }
     return render(request, "credits/payment_form.html", context)
+
+
+@login_required
+def credit_payment_list(request):
+    payments = (
+        CreditPayment.objects.select_related("credit", "credit__customer", "credit__store")
+        .order_by("-date", "-id")
+    )
+    return render(request, "credits/payment_list.html", {"payments": payments})

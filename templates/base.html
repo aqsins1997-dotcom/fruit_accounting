@@ -27,35 +27,33 @@
 
             <div class="nav-section">
                 <div class="nav-section__title">Справочники</div>
-                <a href="/admin/core/store/" class="nav-link">Магазины</a>
-                <a href="/admin/core/product/" class="nav-link">Товары</a>
-                <a href="/admin/core/supplier/" class="nav-link">Поставщики</a>
-                <a href="/admin/core/seller/" class="nav-link">Продавцы</a>
-                <a href="/admin/core/customer/" class="nav-link">Клиенты</a>
+                <a href="{% url 'core:stores_page' %}" class="nav-link">Магазины</a>
+                <a href="{% url 'core:products_page' %}" class="nav-link">Товары</a>
+                <a href="{% url 'core:suppliers_page' %}" class="nav-link">Поставщики</a>
+                <a href="{% url 'core:sellers_page' %}" class="nav-link">Продавцы</a>
+                <a href="{% url 'core:customers_page' %}" class="nav-link">Клиенты</a>
             </div>
 
             <div class="nav-section">
                 <div class="nav-section__title">Склад</div>
-                <a href="/admin/inventory/purchase/" class="nav-link">Закупки</a>
-                <a href="/admin/inventory/purchaseitem/" class="nav-link">Строки закупок</a>
-                <a href="/admin/inventory/storestock/" class="nav-link">Остатки</a>
-                <a href="/admin/inventory/stockmovement/" class="nav-link">Движения</a>
+                <a href="{% url 'inventory:purchase_list' %}" class="nav-link">Закупки</a>
+                <a href="{% url 'inventory:purchase_create' %}" class="nav-link">Новая закупка</a>
+                <a href="{% url 'inventory:stock_list' %}" class="nav-link">Остатки</a>
             </div>
 
             <div class="nav-section">
                 <div class="nav-section__title">Поставщики</div>
-                <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги по поставщикам</a>
+                <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги поставщикам</a>
                 <a href="{% url 'payables:supplier_payment_create' %}" class="nav-link">Новая оплата поставщику</a>
-                <a href="/admin/payables/supplierpayment/" class="nav-link">Оплаты поставщикам</a>
+                <a href="{% url 'payables:supplier_payment_list' %}" class="nav-link">История оплат поставщикам</a>
             </div>
 
             <div class="nav-section">
                 <div class="nav-section__title">Продажи и долги</div>
-                <a href="/admin/sales/sale/" class="nav-link">Продажи</a>
-                <a href="/admin/sales/saleitem/" class="nav-link">Строки продаж</a>
-                <a href="/admin/credits/credit/" class="nav-link">Кредиты</a>
-                <a href="/admin/credits/creditpayment/" class="nav-link">Платежи</a>
+                <a href="{% url 'sales:sale_list' %}" class="nav-link">Продажи</a>
+                <a href="{% url 'sales:sale_create' %}" class="nav-link">Новая продажа</a>
                 <a href="{% url 'reports:debtors_report' %}" class="nav-link">Должники</a>
+                <a href="{% url 'credits:credit_payment_list' %}" class="nav-link">История оплат клиентов</a>
             </div>
 
             <div class="nav-section">
@@ -70,7 +68,7 @@
         <header class="topbar">
             <div>
                 <h1 class="page-title">{% block page_title %}Панель управления{% endblock %}</h1>
-                <p class="page-subtitle">{% block page_subtitle %}Управление магазинами, товарами и продажами{% endblock %}</p>
+                <p class="page-subtitle">{% block page_subtitle %}Управление магазинами, товарами, закупками, продажами и долгами{% endblock %}</p>
             </div>
 
             <div class="topbar__right">
