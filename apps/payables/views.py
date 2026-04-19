@@ -1,4 +1,5 @@
 from decimal import Decimal
+from functools import lru_cache
 
 from django.contrib.auth.decorators import login_required
 from django.db import connection
@@ -11,6 +12,7 @@ from apps.inventory.models import PurchaseItem
 from .models import SupplierPayment
 
 
+@lru_cache(maxsize=None)
 def _table_columns(table_name):
     with connection.cursor() as cursor:
         description = connection.introspection.get_table_description(cursor, table_name)
