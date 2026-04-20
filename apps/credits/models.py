@@ -71,6 +71,11 @@ class Credit(TimeStampedModel):
         verbose_name = "Кредит"
         verbose_name_plural = "Кредиты"
         ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["store", "status"]),
+            models.Index(fields=["customer", "store"]),
+            models.Index(fields=["remaining_amount"]),
+        ]
 
     def __str__(self):
         return f"Кредит #{self.id} | {self.customer} | Остаток: {self.remaining_amount}"
@@ -126,6 +131,9 @@ class CreditPayment(TimeStampedModel):
         verbose_name = "Оплата по кредиту"
         verbose_name_plural = "Оплаты по кредитам"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["credit", "date"]),
+        ]
 
     def __str__(self):
         return f"Оплата #{self.id} | {self.credit.customer} | {self.amount}"

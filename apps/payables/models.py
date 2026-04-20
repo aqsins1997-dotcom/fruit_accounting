@@ -148,6 +148,10 @@ class SupplierPayment(TimeStampedModel):
         verbose_name = "Оплата поставщику"
         verbose_name_plural = "Оплаты поставщикам"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["supplier", "store", "date"]),
+            models.Index(fields=["purchase", "store"]),
+        ]
 
     def __str__(self):
         purchase_part = f" | закупка #{self.purchase_id}" if self.purchase_id else ""
@@ -230,6 +234,10 @@ class SupplierPaymentAllocation(TimeStampedModel):
         verbose_name = "Распределение оплаты поставщику"
         verbose_name_plural = "Распределения оплат поставщикам"
         ordering = ["payment__date", "payment_id", "purchase_id", "id"]
+        indexes = [
+            models.Index(fields=["payment", "purchase"]),
+            models.Index(fields=["store", "purchase"]),
+        ]
 
     def __str__(self):
         return f"Оплата #{self.payment_id} -> закупка #{self.purchase_id} | {self.amount}"

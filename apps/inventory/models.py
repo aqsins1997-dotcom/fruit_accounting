@@ -28,6 +28,9 @@ class Purchase(TimeStampedModel):
         verbose_name = "Закупка"
         verbose_name_plural = "Закупки"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["date", "supplier"]),
+        ]
 
     def __str__(self):
         return f"Закупка #{self.id} от {self.date}"
@@ -67,6 +70,10 @@ class PurchaseItem(TimeStampedModel):
         verbose_name = "Строка закупки"
         verbose_name_plural = "Строки закупки"
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["purchase", "store"]),
+            models.Index(fields=["store", "product"]),
+        ]
 
     def __str__(self):
         return f"{self.store} | {self.product} | {self.quantity_kg} кг"
@@ -299,6 +306,10 @@ class StockMovement(TimeStampedModel):
         verbose_name = "Движение товара"
         verbose_name_plural = "Движения товара"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date"]),
+            models.Index(fields=["product", "date"]),
+        ]
 
     def __str__(self):
         return f"{self.store} | {self.product} | {self.movement_type} | {self.quantity_kg_delta} кг"

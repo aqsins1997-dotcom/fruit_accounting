@@ -92,6 +92,10 @@ class EmployeeAdvance(CashDocumentBase):
         verbose_name = "Подотчетный аванс"
         verbose_name_plural = "Подотчетные авансы"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date", "seller"]),
+            models.Index(fields=["seller", "date"]),
+        ]
 
     def __str__(self):
         return f"{self.seller} | {self.store} | {self.amount}"
@@ -164,6 +168,11 @@ class Expense(CashDocumentBase):
         verbose_name = "Расход сотрудника"
         verbose_name_plural = "Расходы сотрудников"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date", "seller"]),
+            models.Index(fields=["category", "date"]),
+            models.Index(fields=["advance"]),
+        ]
 
     def __str__(self):
         return f"{self.seller} | {self.category} | {self.amount}"
@@ -228,6 +237,9 @@ class StoreExpense(CashDocumentBase):
         verbose_name = "Расход магазина"
         verbose_name_plural = "Расходы магазина"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date", "category"]),
+        ]
 
     def __str__(self):
         return f"{self.store} | {self.category} | {self.amount}"
@@ -266,6 +278,9 @@ class SalaryPayment(CashDocumentBase):
         verbose_name = "Выплата зарплаты"
         verbose_name_plural = "Выплаты зарплаты"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date", "seller"]),
+        ]
 
     def __str__(self):
         return f"{self.seller} | {self.store} | {self.amount}"

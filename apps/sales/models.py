@@ -33,6 +33,9 @@ class CashRegister(TimeStampedModel):
         verbose_name = "Касса магазина"
         verbose_name_plural = "Кассы магазинов"
         ordering = ["store__name"]
+        indexes = [
+            models.Index(fields=["balance"]),
+        ]
 
     def __str__(self):
         return f"{self.store} | Касса | {self.balance}"
@@ -92,6 +95,10 @@ class Sale(TimeStampedModel):
         verbose_name = "Продажа"
         verbose_name_plural = "Продажи"
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["store", "date"]),
+            models.Index(fields=["payment_type", "date"]),
+        ]
 
     def __str__(self):
         return f"Продажа #{self.id} | {self.store} | {self.date}"
@@ -203,6 +210,9 @@ class SaleItem(TimeStampedModel):
         verbose_name = "Строка продажи"
         verbose_name_plural = "Строки продаж"
         ordering = ["id"]
+        indexes = [
+            models.Index(fields=["sale", "product"]),
+        ]
 
     def __str__(self):
         return f"{self.sale} | {self.product} | {self.quantity_kg} кг"
