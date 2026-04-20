@@ -2,7 +2,7 @@
 
 {% block title %}Ежедневный отчет{% endblock %}
 {% block page_title %}Ежедневный отчет по магазину{% endblock %}
-{% block page_subtitle %}Продажи, кредиты и остатки по выбранной дате{% endblock %}
+{% block page_subtitle %}Продажи, подотчет, расходы магазина, зарплата и остатки по выбранной дате{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
@@ -35,27 +35,71 @@
     {% if selected_store %}
     <section class="grid grid--4">
         <div class="stat-card">
-            <div class="stat-card__label">Продажи за день</div>
-            <div class="stat-card__value">{{ total_sales_amount }}</div>
+            <div class="stat-card__label">Выручка за день</div>
+            <div class="stat-card__value">{{ total_sales_amount|floatformat:2 }}</div>
             <div class="stat-card__meta">{{ selected_store.name }}</div>
         </div>
 
         <div class="stat-card">
-            <div class="stat-card__label">Наличные</div>
-            <div class="stat-card__value">{{ cash_sales_total }}</div>
-            <div class="stat-card__meta">Продано за наличные</div>
+            <div class="stat-card__label">Наличные продажи</div>
+            <div class="stat-card__value">{{ cash_sales_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Оплачено сразу</div>
         </div>
 
         <div class="stat-card">
-            <div class="stat-card__label">Кредит</div>
-            <div class="stat-card__value">{{ credit_sales_total }}</div>
-            <div class="stat-card__meta">Отпущено в долг</div>
+            <div class="stat-card__label">Продажи в долг</div>
+            <div class="stat-card__value">{{ credit_sales_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Отпущено в кредит</div>
         </div>
 
         <div class="stat-card">
             <div class="stat-card__label">Текущий долг клиентов</div>
-            <div class="stat-card__value">{{ current_credit_debt }}</div>
-            <div class="stat-card__meta">По магазину на сейчас</div>
+            <div class="stat-card__value">{{ current_credit_debt|floatformat:2 }}</div>
+            <div class="stat-card__meta">Остаток по магазину</div>
+        </div>
+    </section>
+
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Себестоимость</div>
+            <div class="stat-card__value">{{ total_cost_amount|floatformat:2 }}</div>
+            <div class="stat-card__meta">Проданные товары</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Валовая прибыль</div>
+            <div class="stat-card__value">{{ gross_profit_amount|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выручка минус себестоимость</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Все расходы за день</div>
+            <div class="stat-card__value">{{ total_business_expenses|floatformat:2 }}</div>
+            <div class="stat-card__meta">{{ total_expense_operations }} расходных операций</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Чистая прибыль</div>
+            <div class="stat-card__value">{{ net_profit_amount|floatformat:2 }}</div>
+            <div class="stat-card__meta">После расходов сотрудников, магазина и зарплаты</div>
+        </div>
+    </section>
+
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Расходы сотрудников</div>
+            <div class="stat-card__value">{{ employee_expenses_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Подтверждено расходами за день</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Расходы магазина</div>
+            <div class="stat-card__value">{{ store_expenses_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Прямые списания из кассы</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Зарплата</div>
+            <div class="stat-card__value">{{ salary_payments_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выплачено сотрудникам за день</div>
         </div>
     </section>
 
@@ -79,7 +123,7 @@
                         {% for sale in sale_rows %}
                         <tr>
                             <td>{{ sale.id }}</td>
-                            <td>{{ sale.date }}</td>
+                            <td>{{ sale.date|date:"d.m.Y" }}</td>
                             <td>
                                 {% if sale.payment_type == "cash" %}
                                     <span class="badge badge--success">Наличные</span>
@@ -87,14 +131,8 @@
                                     <span class="badge badge--warning">Кредит</span>
                                 {% endif %}
                             </td>
-                            <td>
-                                {% if sale.customer %}
-                                    {{ sale.customer.full_name }}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
-                            <td>{{ sale.total_amount }}</td>
+                            <td>{{ sale.customer.name|default:"—" }}</td>
+                            <td>{{ sale.total_amount|floatformat:2 }}</td>
                         </tr>
                         {% empty %}
                         <tr>
@@ -107,8 +145,8 @@
         </div>
 
         <div class="card">
-            <h3 class="card__title">Кому сегодня выдали в кредит</h3>
-            <p class="card__subtitle">Список клиентов за выбранный день</p>
+            <h3 class="card__title">Кому сегодня дали товар в долг</h3>
+            <p class="card__subtitle">Клиенты по выбранному дню</p>
 
             <div class="table-wrap">
                 <table class="table">
@@ -124,10 +162,10 @@
                     <tbody>
                         {% for credit in today_credit_clients %}
                         <tr>
-                            <td>{{ credit.customer.full_name }}</td>
-                            <td>{{ credit.customer.phone }}</td>
-                            <td>{{ credit.original_amount }}</td>
-                            <td>{{ credit.remaining_amount }}</td>
+                            <td>{{ credit.customer.name }}</td>
+                            <td>{{ credit.customer.phone|default:"—" }}</td>
+                            <td>{{ credit.original_amount|floatformat:2 }}</td>
+                            <td>{{ credit.remaining_amount|floatformat:2 }}</td>
                             <td>
                                 {% if credit.status == "paid" %}
                                     <span class="badge badge--success">Оплачен</span>
@@ -149,39 +187,147 @@
         </div>
     </section>
 
-    <section class="card">
-        <h3 class="card__title">Остатки товара на текущий момент</h3>
-        <p class="card__subtitle">{{ selected_store.name }}</p>
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Расходы сотрудников за день</h3>
+            <p class="card__subtitle">Неотчитанный остаток по магазину на эту дату: {{ outstanding_advance_total|floatformat:2 }}</p>
 
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Товар</th>
-                        <th>Количество (кг)</th>
-                        <th>Средняя закупочная цена</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in stock_rows %}
-                    <tr>
-                        <td>{{ row.product.name }}</td>
-                        <td>{{ row.quantity_kg }}</td>
-                        <td>{{ row.average_purchase_price }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="3">Остатков нет.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Сотрудник</th>
+                            <th>Категория</th>
+                            <th>Аванс</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in expense_rows %}
+                        <tr>
+                            <td>{{ expense.seller.name }}</td>
+                            <td>{{ expense.category.name }}</td>
+                            <td>{% if expense.advance_id %}Аванс №{{ expense.advance_id }}{% else %}Без привязки{% endif %}</td>
+                            <td>{{ expense.amount|floatformat:2 }}</td>
+                            <td>{{ expense.comment|default:"—" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">Подтвержденных расходов сотрудников за этот день нет.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Расходы магазина и зарплата</h3>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Тип</th>
+                            <th>Сотрудник</th>
+                            <th>Категория</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in store_expense_rows %}
+                        <tr>
+                            <td>Расход магазина</td>
+                            <td>—</td>
+                            <td>{{ expense.category.name }}</td>
+                            <td>{{ expense.amount|floatformat:2 }}</td>
+                            <td>{{ expense.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% for payment in salary_rows %}
+                        <tr>
+                            <td>Зарплата</td>
+                            <td>{{ payment.seller.name }}</td>
+                            <td>Зарплата</td>
+                            <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>{{ payment.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not store_expense_rows and not salary_rows %}
+                        <tr>
+                            <td colspan="5">Прямых расходов магазина и выплат зарплаты за этот день нет.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Расходы по категориям</h3>
+            <p class="card__subtitle">Все категории расходов за выбранную дату</p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Категория</th>
+                            <th>Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in expense_by_category %}
+                        <tr>
+                            <td>{{ row.category__name }}</td>
+                            <td>{{ row.total|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="2">Категорий расходов за этот день нет.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Остатки товара на текущий момент</h3>
+            <p class="card__subtitle">{{ selected_store.name }}</p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th>Количество (кг)</th>
+                            <th>Средняя закупочная цена</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in stock_rows %}
+                        <tr>
+                            <td>{{ row.product.name }}</td>
+                            <td>{{ row.quantity_kg }}</td>
+                            <td>{{ row.average_purchase_price|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3">Остатков нет.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </section>
     {% else %}
     <section class="card">
-        <h3 class="card__title">Выбери магазин и дату</h3>
-        <p class="card__subtitle">После выбора появится полный ежедневный отчет.</p>
+        <h3 class="card__title">Выберите магазин и дату</h3>
+        <p class="card__subtitle">После выбора появится полный ежедневный отчет с продажами, расходами и прибылью.</p>
     </section>
     {% endif %}
 </section>

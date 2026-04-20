@@ -23,6 +23,7 @@
                 <div class="nav-section__title">Основное</div>
                 <a href="{% url 'dashboard:index' %}" class="nav-link">Дашборд</a>
                 <a href="{% url 'reports:daily_store_report' %}" class="nav-link">Ежедневный отчет</a>
+                <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
 
             <div class="nav-section">
@@ -30,8 +31,9 @@
                 <a href="{% url 'core:stores_page' %}" class="nav-link">Магазины</a>
                 <a href="{% url 'core:products_page' %}" class="nav-link">Товары</a>
                 <a href="{% url 'core:suppliers_page' %}" class="nav-link">Поставщики</a>
-                <a href="{% url 'core:sellers_page' %}" class="nav-link">Продавцы</a>
+                <a href="{% url 'core:sellers_page' %}" class="nav-link">Сотрудники</a>
                 <a href="{% url 'core:customers_page' %}" class="nav-link">Клиенты</a>
+                <a href="{% url 'expenses:category_list' %}" class="nav-link">Категории расходов</a>
             </div>
 
             <div class="nav-section">
@@ -39,6 +41,16 @@
                 <a href="{% url 'inventory:purchase_list' %}" class="nav-link">Закупки</a>
                 <a href="{% url 'inventory:purchase_create' %}" class="nav-link">Новая закупка</a>
                 <a href="{% url 'inventory:stock_list' %}" class="nav-link">Остатки</a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section__title">Подотчет и расходы</div>
+                <a href="{% url 'expenses:advance_create' %}" class="nav-link">Выдать деньги сотруднику</a>
+                <a href="{% url 'expenses:expense_create' %}" class="nav-link">Добавить расход сотрудника</a>
+                <a href="{% url 'expenses:store_expense_create' %}" class="nav-link">Расход магазина</a>
+                <a href="{% url 'expenses:salary_payment_create' %}" class="nav-link">Зарплата сотруднику</a>
+                <a href="{% url 'expenses:employee_report' %}" class="nav-link">Отчет по сотрудникам</a>
+                <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
 
             <div class="nav-section">
@@ -68,7 +80,7 @@
         <header class="topbar">
             <div>
                 <h1 class="page-title">{% block page_title %}Панель управления{% endblock %}</h1>
-                <p class="page-subtitle">{% block page_subtitle %}Управление магазинами, товарами, закупками, продажами и долгами{% endblock %}</p>
+                <p class="page-subtitle">{% block page_subtitle %}Управление магазинами, товарами, закупками, продажами, долгами и подотчетом{% endblock %}</p>
             </div>
 
             <div class="topbar__right">

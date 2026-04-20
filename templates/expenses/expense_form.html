@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить расход сотрудника{% endblock %}
+{% block page_title %}Добавить расход сотрудника{% endblock %}
+{% block page_subtitle %}Подтвержденный расход бизнеса по сотруднику, магазину и категории{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Что фиксируем</div>
+            <div class="stat-card__value">Подтвержденный расход</div>
+            <div class="stat-card__meta">Этот расход уже уменьшает финансовый результат бизнеса.</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Защита от ошибок</div>
+            <div class="stat-card__value">Без перерасхода</div>
+            <div class="stat-card__meta">Система не даст списать больше, чем выдано сотруднику под отчет.</div>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Параметры расхода</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            {% for field in form %}
+                <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="page-subtitle" style="margin-top: 6px;">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Сохранить расход</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Последние расходы сотрудников</h3>
+        {% if recent_expenses %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Магазин</th>
+                            <th>Сотрудник</th>
+                            <th>Категория</th>
+                            <th>Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in recent_expenses %}
+                        <tr>
+                            <td>{{ expense.date|date:"d.m.Y" }}</td>
+                            <td>{{ expense.store.name }}</td>
+                            <td>{{ expense.seller.name }}</td>
+                            <td>{{ expense.category.name }}</td>
+                            <td>{{ expense.amount|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Расходов сотрудников пока нет</h3>
+                <p>После первого подтвержденного расхода он появится здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

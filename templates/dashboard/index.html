@@ -9,8 +9,8 @@
     <section class="hero">
         <h2 class="hero__title">Рабочий кабинет учета торговли</h2>
         <p class="hero__text">
-            Здесь собраны ключевые показатели по товарам, остаткам и продажам, а ниже вынесены быстрые переходы
-            в не-админские рабочие разделы: закупки, продажи, долги клиентов и долги поставщикам.
+            Здесь собраны ключевые показатели по товарам, продажам, расходам магазина,
+            подотчетным деньгам и зарплате сотрудников за {{ today|date:"d.m.Y" }}.
         </p>
     </section>
 
@@ -35,8 +35,34 @@
 
         <div class="stat-card">
             <div class="stat-card__label">Продажи за сегодня</div>
-            <div class="stat-card__value">{{ stats.today_sales }}</div>
+            <div class="stat-card__value">{{ stats.today_sales|floatformat:2 }}</div>
             <div class="stat-card__meta">Текущая сумма продаж</div>
+        </div>
+    </section>
+
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Все расходы за сегодня</div>
+            <div class="stat-card__value">{{ stats.today_total_expenses|floatformat:2 }}</div>
+            <div class="stat-card__meta">Магазин, сотрудники и зарплата</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Количество расходов</div>
+            <div class="stat-card__value">{{ stats.today_expense_count }}</div>
+            <div class="stat-card__meta">Все расходные операции за день</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Зарплата за сегодня</div>
+            <div class="stat-card__value">{{ stats.today_salary_payments|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выплачено сотрудникам сегодня</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Под отчет за сегодня</div>
+            <div class="stat-card__value">{{ stats.today_advances|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выдано сотрудникам на день</div>
         </div>
     </section>
 
@@ -48,14 +74,18 @@
             <div class="quick-actions">
                 <a href="{% url 'inventory:purchase_create' %}" class="btn btn--primary">Новая закупка</a>
                 <a href="{% url 'sales:sale_create' %}" class="btn btn--success">Новая продажа</a>
-                <a href="{% url 'payables:supplier_payment_create' %}" class="btn">Оплата поставщику</a>
-                <a href="{% url 'reports:debtors_report' %}" class="btn">Долги клиентов</a>
+                <a href="{% url 'expenses:advance_create' %}" class="btn">Выдать деньги сотруднику</a>
+                <a href="{% url 'expenses:expense_create' %}" class="btn">Добавить расход сотрудника</a>
+                <a href="{% url 'expenses:store_expense_create' %}" class="btn">Расход магазина</a>
+                <a href="{% url 'expenses:salary_payment_create' %}" class="btn">Зарплата сотруднику</a>
+                <a href="{% url 'expenses:employee_report' %}" class="btn">Отчет по сотрудникам</a>
+                <a href="{% url 'expenses:expense_report' %}" class="btn">Сводка расходов</a>
             </div>
         </div>
 
         <div class="card">
             <h3 class="card__title">Что уже доступно</h3>
-            <p class="card__subtitle">Основной поток работы закрыт без админки</p>
+            <p class="card__subtitle">Основные процессы бизнеса закрыты в интерфейсе</p>
 
             <div class="kpi-row">
                 <span class="kpi-row__label">Справочники</span>
@@ -70,11 +100,15 @@
                 <span class="badge badge--success">Работает</span>
             </div>
             <div class="kpi-row">
-                <span class="kpi-row__label">Кредиты клиентов</span>
+                <span class="kpi-row__label">Подотчет и расходы сотрудников</span>
                 <span class="badge badge--success">Работает</span>
             </div>
             <div class="kpi-row">
-                <span class="kpi-row__label">Долги поставщикам</span>
+                <span class="kpi-row__label">Расходы магазина и зарплата</span>
+                <span class="badge badge--success">Работает</span>
+            </div>
+            <div class="kpi-row">
+                <span class="kpi-row__label">Долги клиентов и поставщиков</span>
                 <span class="badge badge--success">Работает</span>
             </div>
         </div>
@@ -95,15 +129,17 @@
         </div>
 
         <div class="card">
-            <h3 class="card__title">Финансовые разделы</h3>
-            <p class="card__subtitle">Контроль долгов и оплат</p>
+            <h3 class="card__title">Финансы и подотчет</h3>
+            <p class="card__subtitle">Контроль расходов, зарплаты и неотчитанных денег</p>
 
             <ul class="list-clean">
-                <li><a href="{% url 'payables:supplier_balances' %}">Долги поставщикам</a></li>
-                <li><a href="{% url 'payables:supplier_payment_list' %}">История оплат поставщикам</a></li>
-                <li><a href="{% url 'credits:credit_payment_list' %}">История оплат клиентов</a></li>
-                <li><a href="{% url 'core:suppliers_page' %}">Поставщики</a></li>
-                <li><a href="{% url 'core:customers_page' %}">Клиенты</a></li>
+                <li><a href="{% url 'expenses:category_list' %}">Категории расходов</a></li>
+                <li><a href="{% url 'expenses:advance_create' %}">Выдать деньги сотруднику</a></li>
+                <li><a href="{% url 'expenses:expense_create' %}">Добавить расход сотрудника</a></li>
+                <li><a href="{% url 'expenses:store_expense_create' %}">Расход магазина</a></li>
+                <li><a href="{% url 'expenses:salary_payment_create' %}">Зарплата сотруднику</a></li>
+                <li><a href="{% url 'expenses:employee_report' %}">Отчет по сотрудникам</a></li>
+                <li><a href="{% url 'expenses:expense_report' %}">Сводка расходов</a></li>
             </ul>
         </div>
     </section>

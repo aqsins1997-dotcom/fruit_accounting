@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Зарплата сотруднику{% endblock %}
+{% block page_title %}Зарплата сотруднику{% endblock %}
+{% block page_subtitle %}Отдельная выплата сотруднику с немедленным списанием суммы из кассы магазина{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Сегодня выплачено</div>
+            <div class="stat-card__value">{{ today_salary_total|floatformat:2 }}</div>
+            <div class="stat-card__meta">Все выплаты зарплаты за {{ today|date:"d.m.Y" }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Источник</div>
+            <div class="stat-card__value">Касса магазина</div>
+            <div class="stat-card__meta">После сохранения выплата сразу уменьшает остаток кассы.</div>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Новая выплата зарплаты</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            {% for field in form %}
+                <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Сохранить выплату зарплаты</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Последние выплаты</h3>
+        {% if recent_salary_payments %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Магазин</th>
+                            <th>Сотрудник</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in recent_salary_payments %}
+                        <tr>
+                            <td>{{ payment.date|date:"d.m.Y" }}</td>
+                            <td>{{ payment.store.name }}</td>
+                            <td>{{ payment.seller.name }}</td>
+                            <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>{{ payment.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Выплат пока нет</h3>
+                <p>После первой выплаты зарплаты история появится здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

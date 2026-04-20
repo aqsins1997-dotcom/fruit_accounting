@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Выдать деньги сотруднику{% endblock %}
+{% block page_title %}Выдать деньги сотруднику{% endblock %}
+{% block page_subtitle %}Подотчетная выдача сотруднику с немедленным списанием из кассы магазина{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Что фиксируем</div>
+            <div class="stat-card__value">Подотчет</div>
+            <div class="stat-card__meta">Деньги выдаются сотруднику и уменьшают остаток кассы магазина.</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Когда это станет расходом</div>
+            <div class="stat-card__value">После отчета</div>
+            <div class="stat-card__meta">Чистую прибыль уменьшают только подтвержденные расходы, а не сама выдача под отчет.</div>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Параметры выдачи</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            {% for field in form %}
+                <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="page-subtitle" style="margin-top: 6px;">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Выдать деньги под отчет</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Последние выдачи</h3>
+        {% if recent_advances %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Магазин</th>
+                            <th>Сотрудник</th>
+                            <th>Сумма</th>
+                            <th>Остаток</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for advance in recent_advances %}
+                        <tr>
+                            <td>{{ advance.date|date:"d.m.Y" }}</td>
+                            <td>{{ advance.store.name }}</td>
+                            <td>{{ advance.seller.name }}</td>
+                            <td>{{ advance.amount|floatformat:2 }}</td>
+                            <td>{{ advance.remaining_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Выдач пока нет</h3>
+                <p>После первой выдачи под отчет она появится здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

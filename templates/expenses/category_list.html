@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Категории расходов{% endblock %}
+{% block page_title %}Категории расходов{% endblock %}
+{% block page_subtitle %}Справочник категорий для расходов сотрудников и магазина{% endblock %}
+
+{% block content %}
+<section class="grid grid--2" style="gap: 24px;">
+    <section class="card form-card">
+        <h3 class="card__title">Новая категория</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Сохранить категорию</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Список категорий</h3>
+        {% if categories %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Категория</th>
+                            <th>Статус</th>
+                            <th>Создана</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category in categories %}
+                        <tr>
+                            <td>{{ category.name }}</td>
+                            <td>
+                                {% if category.is_active %}
+                                    <span class="badge badge--success">Активна</span>
+                                {% else %}
+                                    <span class="badge badge--warning">Выключена</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ category.created_at|date:"d.m.Y H:i" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Категорий пока нет</h3>
+                <p>Добавьте первую категорию расхода для работы с расходами магазина и сотрудников.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Расход магазина{% endblock %}
+{% block page_title %}Расход магазина{% endblock %}
+{% block page_subtitle %}Прямой расход магазина с немедленным списанием денег из кассы{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Источник списания</div>
+            <div class="stat-card__value">Касса магазина</div>
+            <div class="stat-card__meta">После сохранения сумма сразу уменьшает остаток кассы.</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Как попадет в отчет</div>
+            <div class="stat-card__value">Сразу в расходы</div>
+            <div class="stat-card__meta">Расход магазина сразу участвует в чистой прибыли бизнеса.</div>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Новый расход магазина</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            {% for field in form %}
+                <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Провести расход магазина</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Последние расходы магазина</h3>
+        {% if recent_store_expenses %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Магазин</th>
+                            <th>Категория</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in recent_store_expenses %}
+                        <tr>
+                            <td>{{ expense.date|date:"d.m.Y" }}</td>
+                            <td>{{ expense.store.name }}</td>
+                            <td>{{ expense.category.name }}</td>
+                            <td>{{ expense.amount|floatformat:2 }}</td>
+                            <td>{{ expense.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Расходов магазина пока нет</h3>
+                <p>После первой операции здесь появится история прямых расходов из кассы.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

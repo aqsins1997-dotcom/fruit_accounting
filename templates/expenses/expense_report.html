@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}Финансовый отчет по расходам{% endblock %}
+{% block page_title %}Финансовый отчет по расходам{% endblock %}
+{% block page_subtitle %}Расходы сотрудников, расходы магазина, зарплата и влияние на чистую прибыль{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card">
+        <h3 class="card__title">Фильтры</h3>
+        <form method="get" class="form-grid">
+            <div class="form-group">
+                <label for="{{ filter_form.store.id_for_label }}">Магазин</label>
+                {{ filter_form.store }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.seller.id_for_label }}">Сотрудник</label>
+                {{ filter_form.seller }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.category.id_for_label }}">Категория</label>
+                {{ filter_form.category }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.date_from.id_for_label }}">Дата от</label>
+                {{ filter_form.date_from }}
+            </div>
+            <div class="form-group">
+                <label for="{{ filter_form.date_to.id_for_label }}">Дата до</label>
+                {{ filter_form.date_to }}
+            </div>
+            <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn--primary">Показать отчет</button>
+                <a href="{% url 'expenses:expense_report' %}" class="btn">Сбросить</a>
+                <a href="{% url 'expenses:expense_create' %}" class="btn">Добавить расход сотрудника</a>
+                <a href="{% url 'expenses:store_expense_create' %}" class="btn">Расход магазина</a>
+                <a href="{% url 'expenses:salary_payment_create' %}" class="btn">Зарплата сотруднику</a>
+            </div>
+        </form>
+    </section>
+
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Под отчет выдано</div>
+            <div class="stat-card__value">{{ summary.advances_issued|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выдачи сотрудникам за выбранный период</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Расходы сотрудников</div>
+            <div class="stat-card__value">{{ summary.employee_expenses|floatformat:2 }}</div>
+            <div class="stat-card__meta">Подтвержденные расходы сотрудников</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Расходы магазина</div>
+            <div class="stat-card__value">{{ summary.store_expenses|floatformat:2 }}</div>
+            <div class="stat-card__meta">Прямые списания из кассы магазина</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Зарплата</div>
+            <div class="stat-card__value">{{ summary.salary_payments|floatformat:2 }}</div>
+            <div class="stat-card__meta">Все выплаты сотрудникам</div>
+        </div>
+    </section>
+
+    <section class="grid grid--4">
+        <div class="stat-card">
+            <div class="stat-card__label">Все расходы</div>
+            <div class="stat-card__value">{{ summary.total_expenses|floatformat:2 }}</div>
+            <div class="stat-card__meta">Сумма всех денежных расходов</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Количество операций</div>
+            <div class="stat-card__value">{{ summary.total_expense_count }}</div>
+            <div class="stat-card__meta">Все расходные операции в отчете</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Выручка</div>
+            <div class="stat-card__value">{{ summary.total_revenue|floatformat:2 }}</div>
+            <div class="stat-card__meta">Продажи по выбранному фильтру</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Себестоимость</div>
+            <div class="stat-card__value">{{ summary.total_cost|floatformat:2 }}</div>
+            <div class="stat-card__meta">Себестоимость проданных товаров</div>
+        </div>
+    </section>
+
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Валовая прибыль</div>
+            <div class="stat-card__value">{{ summary.gross_profit|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выручка минус себестоимость</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Неотчитанный подотчет</div>
+            <div class="stat-card__value">{{ summary.outstanding_advances|floatformat:2 }}</div>
+            <div class="stat-card__meta">Остаток по сотрудникам на текущий период</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Чистая прибыль</div>
+            <div class="stat-card__value">{{ summary.net_profit|floatformat:2 }}</div>
+            <div class="stat-card__meta">После расходов сотрудников, магазина и зарплаты</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Расходы по магазинам</h3>
+        {% if by_store %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Сотрудники</th>
+                            <th>Магазин</th>
+                            <th>Зарплата</th>
+                            <th>Итого</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in by_store %}
+                        <tr>
+                            <td>{{ row.store_name }}</td>
+                            <td>{{ row.employee_expense_amount|floatformat:2 }}</td>
+                            <td>{{ row.store_expense_amount|floatformat:2 }}</td>
+                            <td>{{ row.salary_amount|floatformat:2 }}</td>
+                            <td>{{ row.total_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Расходов по магазинам нет</h3>
+                <p>По текущему фильтру расходные операции не найдены.</p>
+            </div>
+        {% endif %}
+    </section>
+
+    <section class="grid grid--2">
+        <div class="card">
+            <h3 class="card__title">Расходы по сотрудникам</h3>
+            {% if by_seller %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Магазин</th>
+                                <th>Сотрудник</th>
+                                <th>Расходы сотрудника</th>
+                                <th>Зарплата</th>
+                                <th>Итого</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in by_seller %}
+                            <tr>
+                                <td>{{ row.store_name }}</td>
+                                <td>{{ row.seller_name }}</td>
+                                <td>{{ row.employee_expense_amount|floatformat:2 }}</td>
+                                <td>{{ row.salary_amount|floatformat:2 }}</td>
+                                <td>{{ row.total_amount|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <h3>Нет данных по сотрудникам</h3>
+                    <p>Список появится после расходных операций или выплат зарплаты.</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h3 class="card__title">Расходы по категориям</h3>
+            {% if by_category %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Категория</th>
+                                <th>Сумма расходов</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in by_category %}
+                            <tr>
+                                <td>{{ row.category_name }}</td>
+                                <td>{{ row.total_amount|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <h3>Нет данных по категориям</h3>
+                    <p>Категории появятся после первых расходов.</p>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Детализация расходов</h3>
+        {% if expenses %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Тип</th>
+                            <th>Магазин</th>
+                            <th>Сотрудник</th>
+                            <th>Категория</th>
+                            <th>Источник</th>
+                            <th>Сумма</th>
+                            <th>Комментарий</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in expenses %}
+                        <tr>
+                            <td>{{ expense.date|date:"d.m.Y" }}</td>
+                            <td>{{ expense.type_label }}</td>
+                            <td>{{ expense.store_name }}</td>
+                            <td>{{ expense.seller_name }}</td>
+                            <td>{{ expense.category_name }}</td>
+                            <td>{{ expense.source_name }}</td>
+                            <td>{{ expense.amount|floatformat:2 }}</td>
+                            <td>{{ expense.comment|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Расходов не найдено</h3>
+                <p>Измените фильтры или добавьте первый расход, прямое списание магазина или выплату зарплаты.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

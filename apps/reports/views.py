@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from apps.core.models import Customer, Store
 from apps.credits.models import Credit, CreditPayment
+from apps.expenses.models import Expense, SalaryPayment, StoreExpense
+from apps.expenses.services import build_employee_balance_report
 from apps.inventory.models import StoreStock
 from apps.sales.models import Sale
 
@@ -47,10 +49,23 @@ def daily_store_report(request):
     cash_sales_total = Decimal("0.00")
     credit_sales_total = Decimal("0.00")
     total_sales_amount = Decimal("0.00")
+    total_cost_amount = Decimal("0.00")
+    gross_profit_amount = Decimal("0.00")
+    employee_expenses_total = Decimal("0.00")
+    store_expenses_total = Decimal("0.00")
+    salary_payments_total = Decimal("0.00")
+    total_business_expenses = Decimal("0.00")
+    total_expense_operations = 0
+    net_profit_amount = Decimal("0.00")
+    outstanding_advance_total = Decimal("0.00")
     current_credit_debt = Decimal("0.00")
     today_credit_clients = []
     stock_rows = []
     sale_rows = []
+    expense_rows = []
+    store_expense_rows = []
+    salary_rows = []
+    expense_by_category = []
 
     if selected_store:
         sales_qs = Sale.objects.filter(
@@ -60,6 +75,10 @@ def daily_store_report(request):
 
         total_sales_amount = sales_qs.aggregate(
             total=Sum("total_amount")
+        )["total"] or Decimal("0.00")
+
+        total_cost_amount = sales_qs.aggregate(
+            total=Sum("total_cost")
         )["total"] or Decimal("0.00")
 
         cash_sales_total = sales_qs.filter(
@@ -94,6 +113,56 @@ def daily_store_report(request):
 
         sale_rows = sales_qs.select_related("customer").order_by("-id")
 
+        employee_expense_queryset = Expense.objects.filter(
+            store=selected_store,
+            date=report_date_obj,
+        ).select_related("seller", "category", "advance").order_by("-id")
+
+        store_expense_queryset = StoreExpense.objects.filter(
+            store=selected_store,
+            date=report_date_obj,
+        ).select_related("category").order_by("-id")
+
+        salary_queryset = SalaryPayment.objects.filter(
+            store=selected_store,
+            date=report_date_obj,
+        ).select_related("seller").order_by("-id")
+
+        employee_expenses_total = employee_expense_queryset.aggregate(
+            total=Sum("amount")
+        )["total"] or Decimal("0.00")
+
+        store_expenses_total = store_expense_queryset.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        salary_payments_total = salary_queryset.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+        total_business_expenses = employee_expenses_total + store_expenses_total + salary_payments_total
+        total_expense_operations = (
+            employee_expense_queryset.count()
+            + store_expense_queryset.count()
+            + salary_queryset.count()
+        )
+
+        expense_rows = employee_expense_queryset
+        store_expense_rows = store_expense_queryset
+        salary_rows = salary_queryset
+
+        expense_category_map = {}
+        for row in employee_expense_queryset.values("category__name").annotate(total=Sum("amount")).order_by("category__name"):
+            expense_category_map[row["category__name"]] = row["total"] or Decimal("0.00")
+        for row in store_expense_queryset.values("category__name").annotate(total=Sum("amount")).order_by("category__name"):
+            expense_category_map[row["category__name"]] = expense_category_map.get(row["category__name"], Decimal("0.00")) + (row["total"] or Decimal("0.00"))
+        if salary_payments_total:
+            expense_category_map["Зарплата"] = expense_category_map.get("Зарплата", Decimal("0.00")) + salary_payments_total
+        expense_by_category = [
+            {"category__name": category_name, "total": total}
+            for category_name, total in sorted(expense_category_map.items(), key=lambda item: item[0])
+        ]
+
+        _, advance_summary = build_employee_balance_report(store=selected_store, date_to=report_date_obj)
+        outstanding_advance_total = advance_summary["remaining_amount"]
+
+        gross_profit_amount = total_sales_amount - total_cost_amount
+        net_profit_amount = gross_profit_amount - total_business_expenses
+
     context = {
         "stores": stores,
         "selected_store": selected_store,
@@ -101,10 +170,23 @@ def daily_store_report(request):
         "cash_sales_total": cash_sales_total,
         "credit_sales_total": credit_sales_total,
         "total_sales_amount": total_sales_amount,
+        "total_cost_amount": total_cost_amount,
+        "gross_profit_amount": gross_profit_amount,
+        "employee_expenses_total": employee_expenses_total,
+        "store_expenses_total": store_expenses_total,
+        "salary_payments_total": salary_payments_total,
+        "total_business_expenses": total_business_expenses,
+        "total_expense_operations": total_expense_operations,
+        "net_profit_amount": net_profit_amount,
+        "outstanding_advance_total": outstanding_advance_total,
         "current_credit_debt": current_credit_debt,
         "today_credit_clients": today_credit_clients,
         "stock_rows": stock_rows,
         "sale_rows": sale_rows,
+        "expense_rows": expense_rows,
+        "store_expense_rows": store_expense_rows,
+        "salary_rows": salary_rows,
+        "expense_by_category": expense_by_category,
     }
 
     return render(request, "reports/daily_store_report.html", context)
