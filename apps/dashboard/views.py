@@ -8,7 +8,7 @@ from django.utils import timezone
 from apps.core.models import Product, Store
 from apps.expenses.models import EmployeeAdvance, Expense, SalaryPayment, StoreExpense
 from apps.inventory.models import StoreStock
-from apps.sales.models import Sale
+from apps.sales.models import CashRegister, Sale
 
 
 @login_required
@@ -20,6 +20,7 @@ def index(request):
 
     total_stock = StoreStock.objects.aggregate(total=Sum("quantity_kg"))["total"] or 0
     today_sales = Sale.objects.filter(date=today).aggregate(total=Sum("total_amount"))["total"] or 0
+    total_cash = CashRegister.objects.aggregate(total=Sum("balance"))["total"] or Decimal("0.00")
 
     today_employee_expenses = Expense.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     today_store_expenses = StoreExpense.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
@@ -39,6 +40,7 @@ def index(request):
             "products_count": products_count,
             "total_stock": total_stock,
             "today_sales": today_sales,
+            "total_cash": total_cash,
             "today_total_expenses": today_total_expenses,
             "today_expense_count": today_expense_count,
             "today_salary_payments": today_salary_payments,

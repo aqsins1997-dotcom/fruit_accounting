@@ -48,6 +48,12 @@
         </div>
 
         <div class="stat-card">
+            <div class="stat-card__label">Деньги в кассе</div>
+            <div class="stat-card__value">{{ stats.total_cash|floatformat:2 }}</div>
+            <div class="stat-card__meta">Текущая сумма в наличии</div>
+        </div>
+
+        <div class="stat-card">
             <div class="stat-card__label">Количество расходов</div>
             <div class="stat-card__value">{{ stats.today_expense_count }}</div>
             <div class="stat-card__meta">Все расходные операции за день</div>
@@ -74,6 +80,7 @@
             <div class="quick-actions">
                 <a href="{% url 'inventory:purchase_create' %}" class="btn btn--primary">Новая закупка</a>
                 <a href="{% url 'sales:sale_create' %}" class="btn btn--success">Новая продажа</a>
+                <a href="{% url 'sales:cash_registers' %}" class="btn">Касса</a>
                 <a href="{% url 'expenses:advance_create' %}" class="btn">Выдать деньги сотруднику</a>
                 <a href="{% url 'expenses:expense_create' %}" class="btn">Добавить расход сотрудника</a>
                 <a href="{% url 'expenses:store_expense_create' %}" class="btn">Расход магазина</a>
@@ -123,6 +130,7 @@
                 <li><a href="{% url 'inventory:purchase_list' %}">Закупки</a></li>
                 <li><a href="{% url 'inventory:stock_list' %}">Остатки</a></li>
                 <li><a href="{% url 'sales:sale_list' %}">Продажи и касса</a></li>
+                <li><a href="{% url 'sales:cash_registers' %}">Касса</a></li>
                 <li><a href="{% url 'reports:daily_store_report' %}">Ежедневный отчет по магазину</a></li>
                 <li><a href="{% url 'reports:debtors_report' %}">Должники</a></li>
             </ul>

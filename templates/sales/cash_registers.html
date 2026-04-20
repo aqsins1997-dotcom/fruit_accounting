@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Касса{% endblock %}
+{% block page_title %}Касса{% endblock %}
+{% block page_subtitle %}Текущая сумма денег в наличии по всем магазинам{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="grid grid--2">
+        <div class="stat-card">
+            <div class="stat-card__label">Деньги в наличии</div>
+            <div class="stat-card__value">{{ total_cash|floatformat:2 }}</div>
+            <div class="stat-card__meta">Общий остаток по всем кассам магазинов</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Касс всего</div>
+            <div class="stat-card__value">{{ cash_registers|length }}</div>
+            <div class="stat-card__meta">Количество магазинов с кассой</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'sales:sale_create' %}" class="btn btn--primary">Новая продажа</a>
+            <a href="{% url 'sales:sale_list' %}" class="btn">Продажи</a>
+        </div>
+
+        <h3 class="card__title">Остаток денег по магазинам</h3>
+        {% if cash_registers %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Сумма в кассе</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for register in cash_registers %}
+                        <tr>
+                            <td>{{ register.store.name }}</td>
+                            <td>{{ register.balance|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Касс пока нет</h3>
+                <p>После первой наличной продажи или движения по кассе остатки появятся здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

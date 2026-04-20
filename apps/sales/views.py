@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Sum
 from django.shortcuts import redirect, render
 
 from .forms import SaleCreateForm, SaleItemCreateForm
@@ -41,5 +42,19 @@ def sale_list(request):
         {
             "sales": sales,
             "cash_registers": cash_registers,
+        },
+    )
+
+
+@login_required
+def cash_registers(request):
+    registers = CashRegister.objects.select_related("store").order_by("store__name")
+    total_cash = registers.aggregate(total=Sum("balance"))["total"] or 0
+    return render(
+        request,
+        "sales/cash_registers.html",
+        {
+            "cash_registers": registers,
+            "total_cash": total_cash,
         },
     )

@@ -22,6 +22,7 @@
             <div class="nav-section">
                 <div class="nav-section__title">Основное</div>
                 <a href="{% url 'dashboard:index' %}" class="nav-link">Дашборд</a>
+                <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
                 <a href="{% url 'reports:daily_store_report' %}" class="nav-link">Ежедневный отчет</a>
                 <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
@@ -63,6 +64,7 @@
             <div class="nav-section">
                 <div class="nav-section__title">Продажи и долги</div>
                 <a href="{% url 'sales:sale_list' %}" class="nav-link">Продажи</a>
+                <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
                 <a href="{% url 'sales:sale_create' %}" class="nav-link">Новая продажа</a>
                 <a href="{% url 'reports:debtors_report' %}" class="nav-link">Должники</a>
                 <a href="{% url 'credits:credit_payment_list' %}" class="nav-link">История оплат клиентов</a>
