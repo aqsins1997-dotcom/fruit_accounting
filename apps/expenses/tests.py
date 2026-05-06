@@ -75,6 +75,31 @@ class ExpensesTests(TestCase):
         with self.assertRaises(ValidationError):
             save_expense(expense)
 
+    def test_advance_cannot_be_reduced_below_confirmed_expenses(self):
+        advance = EmployeeAdvance(
+            store=self.store,
+            seller=self.seller,
+            date=self.today,
+            amount=Decimal("100.00"),
+            created_by=self.user,
+        )
+        save_employee_advance(advance)
+
+        expense = Expense(
+            store=self.store,
+            seller=self.seller,
+            category=self.category,
+            date=self.today,
+            amount=Decimal("80.00"),
+            advance=advance,
+            created_by=self.user,
+        )
+        save_expense(expense)
+
+        advance.amount = Decimal("50.00")
+        with self.assertRaises(ValidationError):
+            save_employee_advance(advance)
+
     def test_store_expense_cannot_exceed_cash_balance(self):
         CashRegister.objects.filter(store=self.store).update(balance=Decimal("15.00"))
         store_expense = StoreExpense(

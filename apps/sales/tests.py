@@ -1,10 +1,11 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from apps.core.models import Product, Store, Supplier
+from apps.core.models import Customer, Product, Store, Supplier
 from apps.inventory.models import Purchase, PurchaseItem, StoreStock
 
 from .models import CashRegister, Sale, SaleItem
@@ -53,3 +54,46 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(stock.quantity_kg, Decimal("15.000"))
         register = CashRegister.objects.get(store=self.store)
         self.assertEqual(register.balance, Decimal("150.00"))
+
+    def test_changing_cash_sale_to_credit_removes_cash_from_register(self):
+        customer = Customer.objects.create(name="Customer 1")
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("30.00"),
+        )
+        register = CashRegister.objects.get(store=self.store)
+        self.assertEqual(register.balance, Decimal("150.00"))
+
+        sale.payment_type = Sale.PAYMENT_TYPE_CREDIT
+        sale.customer = customer
+        sale.save()
+
+        register.refresh_from_db()
+        sale.refresh_from_db()
+        self.assertEqual(register.balance, Decimal("0.00"))
+        self.assertEqual(sale.credit.remaining_amount, Decimal("150.00"))
+
+    def test_sale_store_cannot_change_after_items_are_saved(self):
+        other_store = Store.objects.create(name="Other store")
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            sale_price_per_kg=Decimal("30.00"),
+        )
+
+        sale.store = other_store
+        with self.assertRaises(ValidationError):
+            sale.save()

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 from apps.core.models import Product, Store, Customer
 from apps.inventory.models import StoreStock, StockMovement
@@ -13,6 +13,10 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+def _money(value):
+    return value.quantize(Decimal("0.01"))
 
 
 class CashRegister(TimeStampedModel):
@@ -39,6 +43,18 @@ class CashRegister(TimeStampedModel):
 
     def __str__(self):
         return f"{self.store} | Касса | {self.balance}"
+
+
+def _apply_cash_register_delta(*, store_id, amount):
+    if not store_id or amount == Decimal("0.00"):
+        return
+
+    register, _ = CashRegister.objects.select_for_update().get_or_create(
+        store_id=store_id,
+        defaults={"balance": Decimal("0.00")},
+    )
+    register.balance += amount
+    register.save(update_fields=["balance", "updated_at"])
 
 
 class Sale(TimeStampedModel):
@@ -156,6 +172,47 @@ class Sale(TimeStampedModel):
         self.save(update_fields=["total_amount", "total_cost", "total_profit", "updated_at"])
 
         self.sync_credit()
+
+
+    def _cash_contribution(self):
+        if self.payment_type == self.PAYMENT_TYPE_CASH:
+            return self.store_id, self.total_amount or Decimal("0.00")
+        return None, Decimal("0.00")
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            old_store_id = None
+            old_cash_amount = Decimal("0.00")
+
+            if self.pk:
+                old = Sale.objects.select_for_update().get(pk=self.pk)
+                if old.store_id != self.store_id and old.items.exists():
+                    raise ValidationError(
+                        {"store": "Cannot change the store after sale items have been saved."}
+                    )
+                update_fields = kwargs.get("update_fields")
+                total_fields = {"total_amount", "total_cost", "total_profit"}
+                if update_fields is None or total_fields.isdisjoint(set(update_fields)):
+                    self.total_amount = old.total_amount
+                    self.total_cost = old.total_cost
+                    self.total_profit = old.total_profit
+                old_store_id, old_cash_amount = old._cash_contribution()
+
+            self.full_clean()
+            super().save(*args, **kwargs)
+
+            new_store_id, new_cash_amount = self._cash_contribution()
+
+            if old_store_id == new_store_id:
+                _apply_cash_register_delta(
+                    store_id=new_store_id,
+                    amount=new_cash_amount - old_cash_amount,
+                )
+            else:
+                _apply_cash_register_delta(store_id=old_store_id, amount=-old_cash_amount)
+                _apply_cash_register_delta(store_id=new_store_id, amount=new_cash_amount)
+
+            self.sync_credit()
 
 
 class SaleItem(TimeStampedModel):
@@ -365,3 +422,132 @@ class SaleItem(TimeStampedModel):
         sale = self.sale
         super().delete(*args, **kwargs)
         sale.recalculate_totals()
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            self.full_clean()
+            is_new = self.pk is None
+
+            old_quantity = Decimal("0.000")
+            old_sale_store_id = None
+            old_product_id = None
+
+            if not is_new:
+                old = SaleItem.objects.select_for_update().select_related("sale").get(pk=self.pk)
+                old_quantity = old.quantity_kg
+                old_sale_store_id = old.sale.store_id
+                old_product_id = old.product_id
+
+            sale = Sale.objects.select_for_update().get(pk=self.sale_id)
+
+            if is_new:
+                stock = StoreStock.objects.select_for_update().get(
+                    store=sale.store,
+                    product=self.product,
+                )
+                _validate_available_stock(stock.quantity_kg, self.quantity_kg)
+
+                self.cost_price_per_kg = stock.average_purchase_price
+                self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
+                self.profit = _money(self.line_total - self.line_cost_total)
+
+                super().save(*args, **kwargs)
+
+                stock.quantity_kg -= self.quantity_kg
+                stock.full_clean()
+                stock.save(update_fields=["quantity_kg", "updated_at"])
+
+                StockMovement.objects.create(
+                    store=sale.store,
+                    product=self.product,
+                    movement_type="sale_out",
+                    quantity_kg_delta=self.quantity_kg,
+                    unit_cost=self.cost_price_per_kg,
+                    total_cost=self.line_cost_total,
+                    reference_note=f"Sale #{self.sale_id}",
+                    date=sale.date,
+                )
+            else:
+                if old_sale_store_id == sale.store_id and old_product_id == self.product_id:
+                    stock = StoreStock.objects.select_for_update().get(
+                        store=sale.store,
+                        product=self.product,
+                    )
+                    new_stock_quantity = stock.quantity_kg + old_quantity - self.quantity_kg
+                    _validate_available_stock(stock.quantity_kg + old_quantity, self.quantity_kg)
+
+                    self.cost_price_per_kg = stock.average_purchase_price
+                    self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                    self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
+                    self.profit = _money(self.line_total - self.line_cost_total)
+
+                    super().save(*args, **kwargs)
+
+                    stock.quantity_kg = new_stock_quantity
+                    stock.full_clean()
+                    stock.save(update_fields=["quantity_kg", "updated_at"])
+                else:
+                    old_stock = StoreStock.objects.select_for_update().get(
+                        store_id=old_sale_store_id,
+                        product_id=old_product_id,
+                    )
+                    new_stock = StoreStock.objects.select_for_update().get(
+                        store=sale.store,
+                        product=self.product,
+                    )
+                    _validate_available_stock(new_stock.quantity_kg, self.quantity_kg)
+
+                    self.cost_price_per_kg = new_stock.average_purchase_price
+                    self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                    self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
+                    self.profit = _money(self.line_total - self.line_cost_total)
+
+                    super().save(*args, **kwargs)
+
+                    old_stock.quantity_kg += old_quantity
+                    old_stock.full_clean()
+                    old_stock.save(update_fields=["quantity_kg", "updated_at"])
+
+                    new_stock.quantity_kg -= self.quantity_kg
+                    new_stock.full_clean()
+                    new_stock.save(update_fields=["quantity_kg", "updated_at"])
+
+            sale.recalculate_totals()
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            sale = Sale.objects.select_for_update().get(pk=self.sale_id)
+            stock, _ = StoreStock.objects.select_for_update().get_or_create(
+                store=sale.store,
+                product=self.product,
+                defaults={
+                    "quantity_kg": Decimal("0.000"),
+                    "average_purchase_price": Decimal("0.00"),
+                },
+            )
+
+            stock.quantity_kg += self.quantity_kg
+            stock.full_clean()
+            stock.save(update_fields=["quantity_kg", "updated_at"])
+
+            StockMovement.objects.create(
+                store=sale.store,
+                product=self.product,
+                movement_type="adjustment_in",
+                quantity_kg_delta=self.quantity_kg,
+                unit_cost=self.cost_price_per_kg,
+                total_cost=self.line_cost_total,
+                reference_note=f"Sale item delete #{self.id}",
+                date=sale.date,
+            )
+
+            super().delete(*args, **kwargs)
+            sale.recalculate_totals()
+
+
+def _validate_available_stock(available_quantity, requested_quantity):
+    if requested_quantity > available_quantity:
+        raise ValidationError(
+            {"quantity_kg": f"Insufficient stock. Available: {available_quantity} kg."}
+        )

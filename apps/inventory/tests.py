@@ -1,12 +1,14 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
+from apps.sales.models import Sale, SaleItem
 
-from .models import PurchaseItem, StoreStock
+from .models import Purchase, PurchaseItem, StoreStock
 
 
 class InventoryNoAdminViewsTests(TestCase):
@@ -40,3 +42,34 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertEqual(PurchaseItem.objects.count(), 1)
         stock = StoreStock.objects.get(store=self.store, product=self.product)
         self.assertEqual(stock.quantity_kg, Decimal("15.500"))
+
+    def test_purchase_cannot_be_reduced_below_sold_quantity(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-19")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("25.00"),
+        )
+
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-20",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("6.000"),
+            sale_price_per_kg=Decimal("40.00"),
+        )
+
+        item.quantity_kg = Decimal("5.000")
+        with self.assertRaises(ValidationError):
+            item.save()
+
+        item.refresh_from_db()
+        stock = StoreStock.objects.get(store=self.store, product=self.product)
+        self.assertEqual(item.quantity_kg, Decimal("10.000"))
+        self.assertEqual(stock.quantity_kg, Decimal("4.000"))

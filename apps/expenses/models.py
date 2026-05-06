@@ -117,6 +117,14 @@ class EmployeeAdvance(CashDocumentBase):
         if self.seller_id and self.store_id and self.seller.store_id != self.store_id:
             errors["seller"] = "Сотрудник должен относиться к выбранному магазину."
 
+        if self.pk and self.amount is not None:
+            confirmed_expenses = self.confirmed_expenses_amount
+            if self.amount < confirmed_expenses:
+                errors["amount"] = (
+                    "Advance amount cannot be lower than already confirmed expenses. "
+                    f"Confirmed: {confirmed_expenses}."
+                )
+
         if errors:
             raise ValidationError(errors)
 
