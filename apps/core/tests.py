@@ -5,6 +5,16 @@ from django.urls import reverse
 from .models import Store
 
 
+class LoginViewTests(TestCase):
+    def test_invalid_login_does_not_crash(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": "missing-user", "password": "bad-password"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+
 class CoreNoAdminViewsTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="core-user", password="secret123")
