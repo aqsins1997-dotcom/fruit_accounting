@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import connection
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
@@ -14,6 +15,18 @@ from apps.inventory.models import PurchaseItem
 
 from .forms import SupplierBalanceFilterForm, SupplierPaymentCreateForm
 from .models import SupplierPayment, SupplierPaymentAllocation
+
+
+def _attach_validation_error(form, exc):
+    if hasattr(exc, "message_dict"):
+        for field_name, messages_list in exc.message_dict.items():
+            target_field = field_name if field_name in form.fields else None
+            for message in messages_list:
+                form.add_error(target_field, message)
+        return
+
+    for message in exc.messages:
+        form.add_error(None, message)
 
 
 @lru_cache(maxsize=None)
@@ -52,9 +65,13 @@ def supplier_payment_create(request):
     if request.method == "POST":
         form = SupplierPaymentCreateForm(request.POST, **form_kwargs)
         if form.is_valid():
-            payment = form.save()
-            messages.success(request, f"Оплата поставщику сохранена: {payment.supplier} / {payment.amount}.")
-            return redirect("payables:supplier_balances")
+            try:
+                payment = form.save()
+            except ValidationError as exc:
+                _attach_validation_error(form, exc)
+            else:
+                messages.success(request, f"Оплата поставщику сохранена: {payment.supplier} / {payment.amount}.")
+                return redirect("payables:supplier_balances")
     else:
         initial = {"date": timezone.now().date()}
         if supplier_id:

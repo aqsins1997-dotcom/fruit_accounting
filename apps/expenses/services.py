@@ -27,7 +27,7 @@ def _save_cash_register(register):
 
 
 def _get_cash_register(store):
-    register, _ = CashRegister.objects.get_or_create(
+    register, _ = CashRegister.objects.select_for_update().get_or_create(
         store=store,
         defaults={"balance": ZERO},
     )

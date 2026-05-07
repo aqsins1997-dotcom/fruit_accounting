@@ -19,6 +19,13 @@ def _money(value):
     return value.quantize(Decimal("0.01"))
 
 
+def _sale_line_total(item):
+    override = getattr(item, "_sale_total_override", None)
+    if override is not None:
+        return _money(override)
+    return _money(item.quantity_kg * item.sale_price_per_kg)
+
+
 class CashRegister(TimeStampedModel):
     store = models.OneToOneField(
         Store,
@@ -448,7 +455,7 @@ class SaleItem(TimeStampedModel):
                 _validate_available_stock(stock.quantity_kg, self.quantity_kg)
 
                 self.cost_price_per_kg = stock.average_purchase_price
-                self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                self.line_total = _sale_line_total(self)
                 self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
                 self.profit = _money(self.line_total - self.line_cost_total)
 
@@ -478,7 +485,7 @@ class SaleItem(TimeStampedModel):
                     _validate_available_stock(stock.quantity_kg + old_quantity, self.quantity_kg)
 
                     self.cost_price_per_kg = stock.average_purchase_price
-                    self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                    self.line_total = _sale_line_total(self)
                     self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
                     self.profit = _money(self.line_total - self.line_cost_total)
 
@@ -499,7 +506,7 @@ class SaleItem(TimeStampedModel):
                     _validate_available_stock(new_stock.quantity_kg, self.quantity_kg)
 
                     self.cost_price_per_kg = new_stock.average_purchase_price
-                    self.line_total = _money(self.quantity_kg * self.sale_price_per_kg)
+                    self.line_total = _sale_line_total(self)
                     self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
                     self.profit = _money(self.line_total - self.line_cost_total)
 

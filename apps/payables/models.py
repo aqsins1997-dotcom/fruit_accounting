@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
 
@@ -174,35 +174,49 @@ class SupplierPayment(TimeStampedModel):
                 raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        with transaction.atomic():
+            self.full_clean()
 
-        previous_supplier_id = None
-        previous_store_id = None
-        if self.pk:
-            previous = SupplierPayment.objects.get(pk=self.pk)
-            previous_supplier_id = previous.supplier_id
-            previous_store_id = previous.store_id
+            previous = None
+            previous_supplier_id = None
+            previous_store_id = None
+            if self.pk:
+                previous = SupplierPayment.objects.select_for_update().select_related("store").get(pk=self.pk)
+                previous_supplier_id = previous.supplier_id
+                previous_store_id = previous.store_id
 
-        super().save(*args, **kwargs)
+            from apps.expenses.services import _apply_cash_outflow
 
-        affected_groups = {(self.supplier_id, self.store_id)}
-        if previous_supplier_id and previous_store_id:
-            affected_groups.add((previous_supplier_id, previous_store_id))
+            _apply_cash_outflow(self, previous_instance=previous)
 
-        for supplier_id, store_id in affected_groups:
+            super().save(*args, **kwargs)
+
+            affected_groups = {(self.supplier_id, self.store_id)}
+            if previous_supplier_id and previous_store_id:
+                affected_groups.add((previous_supplier_id, previous_store_id))
+
+            for supplier_id, store_id in affected_groups:
+                rebuild_supplier_payment_allocations(
+                    supplier_id=supplier_id,
+                    store_id=store_id,
+                )
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            supplier_id = self.supplier_id
+            store_id = self.store_id
+
+            from apps.expenses.services import _get_cash_register, _save_cash_register
+
+            register = _get_cash_register(self.store)
+            register.balance += self.amount
+            _save_cash_register(register)
+
+            super().delete(*args, **kwargs)
             rebuild_supplier_payment_allocations(
                 supplier_id=supplier_id,
                 store_id=store_id,
             )
-
-    def delete(self, *args, **kwargs):
-        supplier_id = self.supplier_id
-        store_id = self.store_id
-        super().delete(*args, **kwargs)
-        rebuild_supplier_payment_allocations(
-            supplier_id=supplier_id,
-            store_id=store_id,
-        )
 
 
 class SupplierPaymentAllocation(TimeStampedModel):

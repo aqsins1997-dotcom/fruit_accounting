@@ -1,3 +1,5 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django import forms
 from django.utils import timezone
 
@@ -25,10 +27,56 @@ class SaleCreateForm(forms.ModelForm):
 
 
 class SaleItemCreateForm(forms.ModelForm):
+    sale_total = forms.DecimalField(
+        label="Сумма продажи",
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        min_value=0,
+        widget=forms.NumberInput(
+            attrs={
+                "step": "0.01",
+                "inputmode": "decimal",
+            }
+        ),
+    )
+
     class Meta:
         model = SaleItem
-        fields = ("product", "quantity_kg", "sale_price_per_kg")
+        fields = ("product", "quantity_kg", "sale_price_per_kg", "sale_total")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["product"].queryset = Product.objects.order_by("name")
+        self.fields["sale_price_per_kg"].required = False
+
+    def clean(self):
+        cleaned_data = super().clean()
+        quantity = cleaned_data.get("quantity_kg")
+        sale_total = cleaned_data.get("sale_total")
+        sale_price = cleaned_data.get("sale_price_per_kg")
+
+        if quantity and quantity > 0 and sale_total is not None:
+            cleaned_data["sale_price_per_kg"] = (sale_total / quantity).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+        elif sale_price is None:
+            self.add_error("sale_price_per_kg", "Укажите цену за кг или сумму продажи.")
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        sale_total = self.cleaned_data.get("sale_total")
+        if sale_total is not None:
+            instance._sale_total_override = sale_total.quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+
+        return instance

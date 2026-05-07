@@ -34,4 +34,82 @@
         </form>
     </section>
 </section>
+
+<script>
+    (function () {
+        const quantityInput = document.getElementById('{{ item_form.quantity_kg.id_for_label }}');
+        const priceInput = document.getElementById('{{ item_form.sale_price_per_kg.id_for_label }}');
+        const totalInput = document.getElementById('{{ item_form.sale_total.id_for_label }}');
+        let lastEdited = null;
+        let isSyncing = false;
+
+        function readNumber(input) {
+            if (!input || input.value.trim() === '') {
+                return null;
+            }
+            const value = Number(input.value.replace(',', '.'));
+            return Number.isFinite(value) ? value : null;
+        }
+
+        function writeMoney(input, value) {
+            if (!input || !Number.isFinite(value)) {
+                return;
+            }
+            input.value = value.toFixed(2);
+        }
+
+        function syncSaleAmounts(source) {
+            if (isSyncing) {
+                return;
+            }
+
+            const quantity = readNumber(quantityInput);
+            if (!quantity || quantity <= 0) {
+                return;
+            }
+
+            isSyncing = true;
+            if (source === 'total') {
+                const total = readNumber(totalInput);
+                if (total !== null) {
+                    writeMoney(priceInput, total / quantity);
+                }
+            } else if (source === 'price') {
+                const price = readNumber(priceInput);
+                if (price !== null) {
+                    writeMoney(totalInput, quantity * price);
+                }
+            } else if (lastEdited === 'total') {
+                const total = readNumber(totalInput);
+                if (total !== null) {
+                    writeMoney(priceInput, total / quantity);
+                }
+            } else {
+                const price = readNumber(priceInput);
+                if (price !== null) {
+                    writeMoney(totalInput, quantity * price);
+                }
+            }
+            isSyncing = false;
+        }
+
+        if (quantityInput) {
+            quantityInput.addEventListener('input', function () {
+                syncSaleAmounts('quantity');
+            });
+        }
+        if (priceInput) {
+            priceInput.addEventListener('input', function () {
+                lastEdited = 'price';
+                syncSaleAmounts('price');
+            });
+        }
+        if (totalInput) {
+            totalInput.addEventListener('input', function () {
+                lastEdited = 'total';
+                syncSaleAmounts('total');
+            });
+        }
+    })();
+</script>
 {% endblock %}

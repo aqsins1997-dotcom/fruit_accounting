@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import redirect, render
@@ -8,19 +9,35 @@ from .forms import SaleCreateForm, SaleItemCreateForm
 from .models import CashRegister, Sale
 
 
+def _attach_validation_error(form, exc):
+    if hasattr(exc, "message_dict"):
+        for field_name, messages_list in exc.message_dict.items():
+            target_field = field_name if field_name in form.fields else None
+            for message in messages_list:
+                form.add_error(target_field, message)
+        return
+
+    for message in exc.messages:
+        form.add_error(None, message)
+
+
 @login_required
 def sale_create(request):
     if request.method == "POST":
         sale_form = SaleCreateForm(request.POST)
         item_form = SaleItemCreateForm(request.POST)
         if sale_form.is_valid() and item_form.is_valid():
-            with transaction.atomic():
-                sale = sale_form.save()
-                item = item_form.save(commit=False)
-                item.sale = sale
-                item.save()
-            messages.success(request, "Продажа сохранена.")
-            return redirect("sales:sale_list")
+            try:
+                with transaction.atomic():
+                    sale = sale_form.save()
+                    item = item_form.save(commit=False)
+                    item.sale = sale
+                    item.save()
+            except ValidationError as exc:
+                _attach_validation_error(item_form, exc)
+            else:
+                messages.success(request, "Продажа сохранена.")
+                return redirect("sales:sale_list")
     else:
         sale_form = SaleCreateForm()
         item_form = SaleItemCreateForm()

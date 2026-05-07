@@ -1,11 +1,13 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
 from apps.inventory.models import Purchase, PurchaseItem
+from apps.sales.models import CashRegister
 
 from .models import SupplierPayment, SupplierPaymentAllocation
 
@@ -24,6 +26,8 @@ class SupplierBalancesViewTests(TestCase):
         self.supplier = Supplier.objects.create(name="Поставщик 1")
         self.other_supplier = Supplier.objects.create(name="Поставщик 2")
         self.product = Product.objects.create(name="Товар 1")
+        CashRegister.objects.create(store=self.store, balance=Decimal("5000.00"))
+        CashRegister.objects.create(store=self.other_store, balance=Decimal("5000.00"))
 
     def test_supplier_balances_renders_and_allocates_general_payment_fifo(self):
         purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
@@ -93,6 +97,93 @@ class SupplierBalancesViewTests(TestCase):
         allocation = SupplierPaymentAllocation.objects.get(payment=payment)
         self.assertEqual(allocation.purchase_id, purchase.id)
         self.assertEqual(allocation.amount, Decimal("60.00"))
+
+    def test_supplier_payment_decreases_cash_and_supplier_debt(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("20.000"),
+            purchase_price_per_kg=Decimal("100.00"),
+        )
+
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-11",
+            amount=Decimal("1000.00"),
+        )
+
+        cash_register = CashRegister.objects.get(store=self.store)
+        self.assertEqual(cash_register.balance, Decimal("4000.00"))
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        self.assertEqual(response.status_code, 200)
+
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["purchase_total"], Decimal("2000.00"))
+        self.assertEqual(group["paid_amount"], Decimal("1000.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("1000.00"))
+
+        payment.refresh_from_db()
+        cash_register.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal("1000.00"))
+        self.assertEqual(cash_register.balance, Decimal("4000.00"))
+
+    def test_supplier_payment_cannot_exceed_cash_balance_and_rolls_back(self):
+        CashRegister.objects.filter(store=self.store).update(balance=Decimal("500.00"))
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("20.000"),
+            purchase_price_per_kg=Decimal("100.00"),
+        )
+
+        with self.assertRaises(ValidationError):
+            SupplierPayment.objects.create(
+                supplier=self.supplier,
+                store=self.store,
+                purchase=purchase,
+                date="2026-04-11",
+                amount=Decimal("1000.00"),
+            )
+
+        self.assertFalse(SupplierPayment.objects.exists())
+        self.assertFalse(SupplierPaymentAllocation.objects.exists())
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("500.00"))
+
+    def test_supplier_payment_delete_restores_cash_and_debt(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("100.00"),
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-11",
+            amount=Decimal("400.00"),
+        )
+
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("4600.00"))
+
+        payment.delete()
+
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("5000.00"))
+        self.assertFalse(SupplierPaymentAllocation.objects.exists())
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["paid_amount"], Decimal("0.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("1000.00"))
 
     def test_allocations_rebuild_when_purchase_item_changes(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
