@@ -23,7 +23,7 @@ def _sum_amount(queryset, field_name="amount"):
 
 
 def calculate_cash_balance(store):
-    from apps.credits.models import CreditPayment
+    from apps.credits.models import ClientDebtPayment, CreditPayment
     from apps.expenses.models import EmployeeAdvance, SalaryPayment, StoreExpense
     from apps.payables.models import SupplierPayment
 
@@ -34,7 +34,13 @@ def calculate_cash_balance(store):
         ),
         "total_amount",
     )
-    credit_payments = _sum_amount(CreditPayment.objects.filter(credit__store=store))
+    client_debt_payments = _sum_amount(ClientDebtPayment.objects.filter(store=store))
+    legacy_credit_payments = _sum_amount(
+        CreditPayment.objects.filter(
+            credit__store=store,
+            client_debt_payment__isnull=True,
+        )
+    )
     supplier_payments = _sum_amount(SupplierPayment.objects.filter(store=store))
     employee_advances = _sum_amount(EmployeeAdvance.objects.filter(store=store))
     store_expenses = _sum_amount(StoreExpense.objects.filter(store=store))
@@ -42,7 +48,8 @@ def calculate_cash_balance(store):
 
     return _money(
         cash_sales
-        + credit_payments
+        + client_debt_payments
+        + legacy_credit_payments
         - supplier_payments
         - employee_advances
         - store_expenses

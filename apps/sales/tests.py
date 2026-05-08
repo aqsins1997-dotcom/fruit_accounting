@@ -10,7 +10,7 @@ from apps.expenses.models import ExpenseCategory, StoreExpense
 from apps.inventory.models import Purchase, PurchaseItem, StoreStock
 from apps.payables.models import SupplierPayment
 
-from .models import CashRegister, Sale, SaleItem
+from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 from .services import recalculate_cash_registers
 
 
@@ -24,7 +24,7 @@ class SalesNoAdminViewsTests(TestCase):
         self.product = Product.objects.create(name="Груша")
 
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-18")
-        PurchaseItem.objects.create(
+        self.purchase_item = PurchaseItem.objects.create(
             purchase=purchase,
             store=self.store,
             product=self.product,
@@ -57,6 +57,40 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(stock.quantity_kg, Decimal("15.000"))
         register = CashRegister.objects.get(store=self.store)
         self.assertEqual(register.balance, Decimal("150.00"))
+
+    def test_sale_is_allocated_to_purchase_batches_fifo(self):
+        second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
+        second_item = PurchaseItem.objects.create(
+            purchase=second_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            purchase_price_per_kg=Decimal("20.00"),
+        )
+
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        item = SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("22.000"),
+            sale_price_per_kg=Decimal("30.00"),
+        )
+
+        batches = list(SaleItemBatch.objects.order_by("id"))
+        self.assertEqual(len(batches), 2)
+        self.assertEqual(batches[0].purchase_item_id, self.purchase_item.id)
+        self.assertEqual(batches[0].quantity, Decimal("20.000"))
+        self.assertEqual(batches[1].purchase_item_id, second_item.id)
+        self.assertEqual(batches[1].quantity, Decimal("2.000"))
+
+        item.refresh_from_db()
+        self.assertEqual(item.line_cost_total, Decimal("240.00"))
+        self.assertEqual(item.profit, Decimal("420.00"))
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("3.000"))
 
     def test_cash_sale_can_be_created_from_quantity_and_total(self):
         response = self.client.post(

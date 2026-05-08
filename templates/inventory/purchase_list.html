@@ -28,7 +28,24 @@
                         <td>{{ purchase.supplier.name }}</td>
                         <td>
                             {% for item in purchase.items.all %}
-                                <div>{{ item.store }} / {{ item.product }} / {{ item.quantity_kg }} кг / {{ item.purchase_price_per_kg }}</div>
+                                <div>
+                                    {{ item.store }} / {{ item.product }} /
+                                    закуплено {{ item.quantity_kg }} кг /
+                                    закупочная {{ item.purchase_price_per_kg|floatformat:2 }}
+                                    {% if item.profitability %}
+                                        / продано {{ item.profitability.sold_quantity }} кг
+                                        / остаток {{ item.profitability.stock_quantity }} кг
+                                        / средняя продажа {{ item.profitability.average_sale_price|floatformat:2 }}
+                                        / маржа {{ item.profitability.margin_per_unit|floatformat:2 }}
+                                        / прибыль {{ item.profitability.profit|floatformat:2 }}
+                                    {% else %}
+                                        / продано 0.000 кг
+                                        / остаток {{ item.quantity_kg }} кг
+                                        / средняя продажа 0.00
+                                        / маржа 0.00
+                                        / прибыль 0.00
+                                    {% endif %}
+                                </div>
                             {% empty %}
                                 -
                             {% endfor %}

@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin
 
-from .models import Credit, CreditPayment
+from .models import ClientDebtPayment, Credit, CreditPayment
 
 
 class CreditPaymentAdminForm(forms.ModelForm):
@@ -38,7 +38,7 @@ class CreditPaymentAdminForm(forms.ModelForm):
 class CreditPaymentInline(admin.TabularInline):
     model = CreditPayment
     extra = 0
-    fields = ("date", "amount", "comment", "created_at")
+    fields = ("date", "amount", "client_debt_payment", "comment", "created_at")
     readonly_fields = ("created_at",)
 
 
@@ -60,7 +60,7 @@ class CreditAdmin(admin.ModelAdmin):
         "created_at",
     )
     search_fields = (
-        "customer__full_name",
+        "customer__name",
         "customer__phone",
         "sale__id",
         "store__name",
@@ -124,7 +124,7 @@ class CreditPaymentAdmin(admin.ModelAdmin):
         "credit__store",
     )
     search_fields = (
-        "credit__customer__full_name",
+        "credit__customer__name",
         "credit__customer__phone",
         "credit__sale__id",
         "credit__store__name",
@@ -133,6 +133,7 @@ class CreditPaymentAdmin(admin.ModelAdmin):
 
     fields = (
         "credit",
+        "client_debt_payment",
         "date",
         "amount",
         "comment",
@@ -145,3 +146,31 @@ class CreditPaymentAdmin(admin.ModelAdmin):
     def store_name(self, obj):
         return obj.credit.store
     store_name.short_description = "Магазин"
+
+
+@admin.register(ClientDebtPayment)
+class ClientDebtPaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "client",
+        "store",
+        "amount",
+        "payment_method",
+        "paid_at",
+        "employee",
+        "created_at",
+    )
+    list_filter = (
+        "paid_at",
+        "payment_method",
+        "store",
+        "created_at",
+    )
+    search_fields = (
+        "client__name",
+        "client__phone",
+        "store__name",
+        "employee__username",
+    )
+    autocomplete_fields = ("store", "client", "employee")
+    readonly_fields = ("created_at", "updated_at")

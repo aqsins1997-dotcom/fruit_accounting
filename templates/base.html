@@ -24,6 +24,7 @@
                 <a href="{% url 'dashboard:index' %}" class="nav-link">Дашборд</a>
                 <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
                 <a href="{% url 'reports:daily_store_report' %}" class="nav-link">Ежедневный отчет</a>
+                <a href="{% url 'reports:product_profitability_report' %}" class="nav-link">Аналитика товаров</a>
                 <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
 
@@ -67,6 +68,7 @@
                 <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
                 <a href="{% url 'sales:sale_create' %}" class="nav-link">Новая продажа</a>
                 <a href="{% url 'reports:debtors_report' %}" class="nav-link">Должники</a>
+                <a href="{% url 'credits:client_debt_payment_create' %}" class="nav-link">Новая оплата клиента</a>
                 <a href="{% url 'credits:credit_payment_list' %}" class="nav-link">История оплат клиентов</a>
             </div>
 

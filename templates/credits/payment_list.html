@@ -8,6 +8,7 @@
 <section class="grid" style="gap: 24px;">
     <section class="card">
         <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'credits:client_debt_payment_create' %}" class="btn btn--primary">Новая оплата клиента</a>
             <a href="{% url 'reports:debtors_report' %}" class="btn">К списку должников</a>
         </div>
 
@@ -17,22 +18,24 @@
                     <thead>
                         <tr>
                             <th>Дата</th>
-                            <th>Клиент</th>
                             <th>Магазин</th>
-                            <th>Кредит</th>
+                            <th>Клиент</th>
                             <th>Сумма</th>
+                            <th>Способ оплаты</th>
                             <th>Комментарий</th>
+                            <th>Сотрудник</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for payment in payments %}
                         <tr>
-                            <td>{{ payment.date|date:"d.m.Y" }}</td>
-                            <td>{{ payment.credit.customer.name }}</td>
-                            <td>{{ payment.credit.store.name }}</td>
-                            <td>#{{ payment.credit_id }}</td>
+                            <td>{{ payment.paid_at|date:"d.m.Y" }}</td>
+                            <td>{{ payment.store.name }}</td>
+                            <td>{{ payment.client.name }}</td>
                             <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>{{ payment.get_payment_method_display }}</td>
                             <td>{{ payment.comment|default:"—" }}</td>
+                            <td>{{ payment.employee.username|default:"—" }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

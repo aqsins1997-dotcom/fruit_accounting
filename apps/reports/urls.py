@@ -12,6 +12,8 @@ from .views import (
     mobile_home,
     mobile_purchase_add,
     mobile_sale_add,
+    product_profitability_data,
+    product_profitability_report,
 )
 
 app_name = "reports"
@@ -24,6 +26,8 @@ urlpatterns = [
     path("mobile/debtors/<int:credit_id>/pay/", mobile_credit_payment_add, name="mobile_credit_payment_add"),
     path("mobile/sales/add/", mobile_sale_add, name="mobile_sale_add"),
     path("daily-store/", daily_store_report, name="daily_store_report"),
+    path("product-profitability/", product_profitability_report, name="product_profitability_report"),
+    path("product-profitability/data/", product_profitability_data, name="product_profitability_data"),
     path("debtors/", debtors_report, name="debtors_report"),
     path("debtors/print/", debtors_print_report, name="debtors_print_report"),
     path("debtors/<int:customer_id>/", debtor_detail, name="debtor_detail"),

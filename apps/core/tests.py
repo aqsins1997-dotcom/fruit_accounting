@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .models import Store
+from .models import Product, Store
 
 
 class LoginViewTests(TestCase):
@@ -24,6 +24,12 @@ class CoreNoAdminViewsTests(TestCase):
     def test_store_directory_page_renders(self):
         response = self.client.get(reverse("core:stores_page"))
         self.assertEqual(response.status_code, 200)
+
+    def test_products_page_shows_profitability_columns(self):
+        Product.objects.create(name="Тестовый товар")
+        response = self.client.get(reverse("core:products_page"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Средняя цена продажи")
 
     def test_store_can_be_created_without_admin(self):
         response = self.client.post(

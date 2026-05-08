@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 from apps.core.models import Product, Store, Customer
-from apps.inventory.models import StoreStock, StockMovement
+from apps.inventory.models import PurchaseItem, StoreStock, StockMovement
 
 
 class TimeStampedModel(models.Model):
@@ -454,12 +454,21 @@ class SaleItem(TimeStampedModel):
                 )
                 _validate_available_stock(stock.quantity_kg, self.quantity_kg)
 
-                self.cost_price_per_kg = stock.average_purchase_price
                 self.line_total = _sale_line_total(self)
-                self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
-                self.profit = _money(self.line_total - self.line_cost_total)
+                self.cost_price_per_kg = Decimal("0.00")
+                self.line_cost_total = Decimal("0.00")
+                self.profit = self.line_total
 
                 super().save(*args, **kwargs)
+
+                _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
+                super().save(update_fields=[
+                    "cost_price_per_kg",
+                    "line_total",
+                    "line_cost_total",
+                    "profit",
+                    "updated_at",
+                ])
 
                 stock.quantity_kg -= self.quantity_kg
                 stock.full_clean()
@@ -484,10 +493,8 @@ class SaleItem(TimeStampedModel):
                     new_stock_quantity = stock.quantity_kg + old_quantity - self.quantity_kg
                     _validate_available_stock(stock.quantity_kg + old_quantity, self.quantity_kg)
 
-                    self.cost_price_per_kg = stock.average_purchase_price
                     self.line_total = _sale_line_total(self)
-                    self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
-                    self.profit = _money(self.line_total - self.line_cost_total)
+                    _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
 
                     super().save(*args, **kwargs)
 
@@ -505,10 +512,8 @@ class SaleItem(TimeStampedModel):
                     )
                     _validate_available_stock(new_stock.quantity_kg, self.quantity_kg)
 
-                    self.cost_price_per_kg = new_stock.average_purchase_price
                     self.line_total = _sale_line_total(self)
-                    self.line_cost_total = _money(self.quantity_kg * self.cost_price_per_kg)
-                    self.profit = _money(self.line_total - self.line_cost_total)
+                    _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
 
                     super().save(*args, **kwargs)
 
@@ -553,8 +558,135 @@ class SaleItem(TimeStampedModel):
             sale.recalculate_totals()
 
 
+class SaleItemBatch(TimeStampedModel):
+    sale_item = models.ForeignKey(
+        SaleItem,
+        on_delete=models.CASCADE,
+        related_name="batches",
+        verbose_name="Строка продажи",
+    )
+    purchase_item = models.ForeignKey(
+        PurchaseItem,
+        on_delete=models.PROTECT,
+        related_name="sale_batches",
+        verbose_name="Партия закупки",
+    )
+    quantity = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        verbose_name="Количество",
+    )
+    sale_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name="Цена продажи",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name="Сумма продажи",
+    )
+
+    class Meta:
+        db_table = "sale_item_batches"
+        verbose_name = "Распределение продажи по партии"
+        verbose_name_plural = "Распределения продаж по партиям"
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["sale_item"]),
+            models.Index(fields=["purchase_item"]),
+        ]
+
+    def __str__(self):
+        return f"{self.sale_item_id} -> {self.purchase_item_id}: {self.quantity}"
+
+    def clean(self):
+        if self.quantity is not None and self.quantity <= 0:
+            raise ValidationError({"quantity": "Количество партии должно быть больше 0."})
+        if self.sale_price is not None and self.sale_price < 0:
+            raise ValidationError({"sale_price": "Цена продажи не может быть отрицательной."})
+        if self.total_amount is not None and self.total_amount < 0:
+            raise ValidationError({"total_amount": "Сумма продажи не может быть отрицательной."})
+
+        if self.sale_item_id and self.purchase_item_id:
+            sale = self.sale_item.sale
+            if self.purchase_item.store_id != sale.store_id:
+                raise ValidationError({"purchase_item": "Партия должна относиться к магазину продажи."})
+            if self.purchase_item.product_id != self.sale_item.product_id:
+                raise ValidationError({"purchase_item": "Партия должна относиться к товару продажи."})
+
+    def save(self, *args, **kwargs):
+        if self.total_amount is None:
+            self.total_amount = _money(self.quantity * self.sale_price)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 def _validate_available_stock(available_quantity, requested_quantity):
     if requested_quantity > available_quantity:
         raise ValidationError(
-            {"quantity_kg": f"Insufficient stock. Available: {available_quantity} kg."}
+            {"quantity_kg": f"Недостаточно остатка. Доступно: {available_quantity} кг."}
         )
+
+
+def _purchase_item_allocated_quantity(purchase_item):
+    return SaleItemBatch.objects.filter(purchase_item=purchase_item).aggregate(
+        total=models.Sum("quantity")
+    )["total"] or Decimal("0.000")
+
+
+def _replace_sale_item_batches(sale_item, *, sale):
+    SaleItemBatch.objects.filter(sale_item=sale_item).delete()
+
+    remaining_quantity = sale_item.quantity_kg
+    remaining_amount = sale_item.line_total
+    total_cost = Decimal("0.00")
+
+    purchase_items = (
+        PurchaseItem.objects.select_for_update()
+        .filter(store_id=sale.store_id, product_id=sale_item.product_id)
+        .select_related("purchase")
+        .order_by("purchase__date", "id")
+    )
+
+    for purchase_item in purchase_items:
+        if remaining_quantity <= Decimal("0.000"):
+            break
+
+        available_quantity = purchase_item.quantity_kg - _purchase_item_allocated_quantity(purchase_item)
+        if available_quantity <= Decimal("0.000"):
+            continue
+
+        batch_quantity = min(available_quantity, remaining_quantity)
+        if batch_quantity == remaining_quantity:
+            batch_amount = remaining_amount
+        else:
+            batch_amount = _money(sale_item.line_total * batch_quantity / sale_item.quantity_kg)
+
+        SaleItemBatch.objects.create(
+            sale_item=sale_item,
+            purchase_item=purchase_item,
+            quantity=batch_quantity,
+            sale_price=sale_item.sale_price_per_kg,
+            total_amount=batch_amount,
+        )
+
+        total_cost += batch_quantity * purchase_item.purchase_price_per_kg
+        remaining_quantity -= batch_quantity
+        remaining_amount -= batch_amount
+
+    if remaining_quantity > Decimal("0.000"):
+        raise ValidationError(
+            {"quantity_kg": f"Недостаточно остатка по партиям. Не распределено: {remaining_quantity} кг."}
+        )
+
+    return total_cost
+
+
+def _apply_batch_costs(sale_item, total_cost):
+    sale_item.line_cost_total = _money(total_cost)
+    if sale_item.quantity_kg > Decimal("0.000"):
+        sale_item.cost_price_per_kg = _money(total_cost / sale_item.quantity_kg)
+    else:
+        sale_item.cost_price_per_kg = Decimal("0.00")
+    sale_item.profit = _money(sale_item.line_total - sale_item.line_cost_total)

@@ -2,6 +2,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 
+from apps.reports.services import build_product_profitability_rows
+
 from .forms import CustomerForm, ProductForm, SellerForm, StoreForm, SupplierForm
 from .models import Customer, Product, Seller, Store, Supplier
 
@@ -71,14 +73,29 @@ def suppliers_page(request):
 
 @login_required
 def products_page(request):
-    return _directory_page(
-        request,
-        form_class=ProductForm,
-        queryset=Product.objects.order_by("name"),
-        template_name="core/directory_page.html",
-        title="Товары",
-        success_message="Товар добавлен.",
-    )
+    if request.method == "POST":
+        form = ProductForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Товар добавлен.")
+            return redirect(request.path)
+    else:
+        form = ProductForm()
+
+    analytics_by_product = {
+        row["product_id"]: row
+        for row in build_product_profitability_rows(group_by_store=False)
+    }
+    products = Product.objects.order_by("name")
+    for product in products:
+        product.profitability = analytics_by_product.get(product.id)
+
+    context = {
+        "title": "Товары",
+        "form": form,
+        "objects": products,
+    }
+    return render(request, "core/products_page.html", context)
 
 
 @login_required

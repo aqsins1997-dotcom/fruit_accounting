@@ -1,49 +1,97 @@
 {% extends "base.html" %}
 
-{% block title %}Оплата долга{% endblock %}
-{% block page_title %}Оплата долга{% endblock %}
-{% block page_subtitle %}Создание платежа по кредиту без админки{% endblock %}
+{% block title %}Новая оплата клиента{% endblock %}
+{% block page_title %}Новая оплата клиента{% endblock %}
+{% block page_subtitle %}Погашение клиентского долга с автоматическим пополнением кассы{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
     <section class="grid grid--3">
         <div class="stat-card">
             <div class="stat-card__label">Клиент</div>
-            <div class="stat-card__value">{{ credit.customer.full_name|default:credit.customer.name }}</div>
-            <div class="stat-card__meta">{{ credit.customer.phone|default:"Телефон не указан" }}</div>
+            <div class="stat-card__value">
+                {% if selected_client %}
+                    {{ selected_client.name }}
+                {% else %}
+                    Не выбран
+                {% endif %}
+            </div>
+            <div class="stat-card__meta">
+                {% if selected_client %}
+                    {{ selected_client.phone|default:"Телефон не указан" }}
+                {% else %}
+                    Выберите клиента в форме
+                {% endif %}
+            </div>
         </div>
 
         <div class="stat-card">
             <div class="stat-card__label">Магазин</div>
-            <div class="stat-card__value">{{ credit.store.name }}</div>
-            <div class="stat-card__meta">Кредит #{{ credit.id }}</div>
+            <div class="stat-card__value">
+                {% if selected_store %}
+                    {{ selected_store.name }}
+                {% else %}
+                    Не выбран
+                {% endif %}
+            </div>
+            <div class="stat-card__meta">Касса магазина пополнится на сумму оплаты</div>
         </div>
 
         <div class="stat-card">
-            <div class="stat-card__label">Остаток долга</div>
-            <div class="stat-card__value">{{ credit.remaining_amount }}</div>
-            <div class="stat-card__meta">Текущий остаток</div>
+            <div class="stat-card__label">Текущий долг</div>
+            <div class="stat-card__value">
+                {% if current_debt != None %}
+                    {{ current_debt }}
+                {% else %}
+                    —
+                {% endif %}
+            </div>
+            <div class="stat-card__meta">По выбранному магазину и клиенту</div>
         </div>
     </section>
 
     <section class="card form-card" style="max-width: 100%;">
-        <h3 class="card__title">Новая оплата</h3>
+        <h3 class="card__title">Оплата долга</h3>
         <form method="post" class="form-grid">
             {% csrf_token %}
 
             <div class="form-group">
-                <label for="{{ form.date.id_for_label }}">Дата</label>
-                {{ form.date }}
-                {% if form.date.errors %}
-                    <div class="message error">{{ form.date.errors|join:", " }}</div>
+                <label for="{{ form.store.id_for_label }}">Магазин</label>
+                {{ form.store }}
+                {% if form.store.errors %}
+                    <div class="message error">{{ form.store.errors|join:", " }}</div>
                 {% endif %}
             </div>
 
             <div class="form-group">
-                <label for="{{ form.amount.id_for_label }}">Сумма</label>
+                <label for="{{ form.client.id_for_label }}">Клиент</label>
+                {{ form.client }}
+                {% if form.client.errors %}
+                    <div class="message error">{{ form.client.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.amount.id_for_label }}">Сумма оплаты</label>
                 {{ form.amount }}
                 {% if form.amount.errors %}
                     <div class="message error">{{ form.amount.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.payment_method.id_for_label }}">Способ оплаты</label>
+                {{ form.payment_method }}
+                {% if form.payment_method.errors %}
+                    <div class="message error">{{ form.payment_method.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.paid_at.id_for_label }}">Дата оплаты</label>
+                {{ form.paid_at }}
+                {% if form.paid_at.errors %}
+                    <div class="message error">{{ form.paid_at.errors|join:", " }}</div>
                 {% endif %}
             </div>
 
@@ -63,7 +111,8 @@
 
             <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <button type="submit" class="btn btn--primary">Сохранить оплату</button>
-                <a href="{% url 'reports:debtor_detail' credit.customer_id %}" class="btn">Назад к карточке</a>
+                <a href="{% url 'reports:debtors_report' %}" class="btn">К должникам</a>
+                <a href="{% url 'credits:credit_payment_list' %}" class="btn">История оплат</a>
             </div>
         </form>
     </section>

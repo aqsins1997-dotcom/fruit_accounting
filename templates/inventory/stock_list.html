@@ -15,6 +15,12 @@
                         <th>Товар</th>
                         <th>Количество</th>
                         <th>Средняя закупочная цена</th>
+                        <th>Продано</th>
+                        <th>Средняя цена продажи</th>
+                        <th>Выручка</th>
+                        <th>Себестоимость</th>
+                        <th>Прибыль</th>
+                        <th>Маржа на единицу</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -24,6 +30,12 @@
                         <td>{{ stock.product.name }}</td>
                         <td>{{ stock.quantity_kg }}</td>
                         <td>{{ stock.average_purchase_price|floatformat:2 }}</td>
+                        <td>{{ stock.profitability.sold_quantity|default:"0.000" }}</td>
+                        <td>{% if stock.profitability %}{{ stock.profitability.average_sale_price|floatformat:2 }}{% else %}0.00{% endif %}</td>
+                        <td>{% if stock.profitability %}{{ stock.profitability.revenue|floatformat:2 }}{% else %}0.00{% endif %}</td>
+                        <td>{% if stock.profitability %}{{ stock.profitability.sold_cost|floatformat:2 }}{% else %}0.00{% endif %}</td>
+                        <td>{% if stock.profitability %}{{ stock.profitability.profit|floatformat:2 }}{% else %}0.00{% endif %}</td>
+                        <td>{% if stock.profitability %}{{ stock.profitability.margin_per_unit|floatformat:2 }}{% else %}0.00{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

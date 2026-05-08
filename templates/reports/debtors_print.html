@@ -89,18 +89,18 @@
                 <th>№</th>
                 <th>Магазин</th>
                 <th>Клиент</th>
-                <th>Дата</th>
+                <th>Телефон</th>
                 <th>Долг</th>
             </tr>
         </thead>
         <tbody>
-            {% for credit in credits %}
+            {% for row in debtor_rows %}
             <tr>
                 <td>{{ forloop.counter }}</td>
-                <td>{{ credit.store.name }}</td>
-                <td>{{ credit.customer.full_name|default:credit.customer.name }}</td>
-                <td>{{ credit.sale.date|default:credit.created_at|date:"d.m.Y" }}</td>
-                <td>{{ credit.remaining_amount }}</td>
+                <td>{{ row.store_name }}</td>
+                <td>{{ row.customer_name }}</td>
+                <td>{{ row.customer_phone|default:"—" }}</td>
+                <td>{{ row.total_debt }}</td>
             </tr>
             {% empty %}
             <tr>

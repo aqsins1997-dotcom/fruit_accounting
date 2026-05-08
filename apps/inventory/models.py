@@ -59,6 +59,17 @@ def _save_stock(stock):
     stock.save(update_fields=["quantity_kg", "average_purchase_price", "updated_at"])
 
 
+def _get_purchase_item_allocated_quantity(purchase_item_id):
+    if not purchase_item_id:
+        return Decimal("0.000")
+
+    from apps.sales.models import SaleItemBatch
+
+    return SaleItemBatch.objects.filter(purchase_item_id=purchase_item_id).aggregate(
+        total=models.Sum("quantity")
+    )["total"] or Decimal("0.000")
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -302,6 +313,26 @@ class PurchaseItem(TimeStampedModel):
                 old_store_id = old.store_id
                 old_product_id = old.product_id
                 old_supplier_id = old.purchase.supplier_id
+                allocated_quantity = _get_purchase_item_allocated_quantity(self.pk)
+                if allocated_quantity > self.quantity_kg:
+                    raise ValidationError(
+                        {
+                            "quantity_kg": (
+                                "Нельзя уменьшить закупку ниже уже проданного по этой партии. "
+                                f"Продано: {allocated_quantity} кг."
+                            )
+                        }
+                    )
+                if allocated_quantity > 0 and (
+                    old_store_id != self.store_id or old_product_id != self.product_id
+                ):
+                    raise ValidationError(
+                        {
+                            "product": (
+                                "Нельзя менять магазин или товар закупки, по которой уже были продажи."
+                            )
+                        }
+                    )
 
             if is_new:
                 super().save(*args, **kwargs)
@@ -352,6 +383,17 @@ class PurchaseItem(TimeStampedModel):
 
     def delete(self, *args, **kwargs):
         with transaction.atomic():
+            allocated_quantity = _get_purchase_item_allocated_quantity(self.pk)
+            if allocated_quantity > 0:
+                raise ValidationError(
+                    {
+                        "quantity_kg": (
+                            "Нельзя удалить закупку, по которой уже были продажи. "
+                            f"Продано: {allocated_quantity} кг."
+                        )
+                    }
+                )
+
             stock = _get_or_create_locked_stock(store_id=self.store_id, product_id=self.product_id)
             new_quantity = stock.quantity_kg - self.quantity_kg
             _validate_non_negative_stock(new_quantity)

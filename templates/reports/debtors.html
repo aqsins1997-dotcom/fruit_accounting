@@ -90,23 +90,32 @@
                         <th>Клиент</th>
                         <th>Телефон</th>
                         <th>Сумма долга</th>
+                        <th>Действие</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for credit in credits %}
+                    {% for row in debtor_rows %}
                     <tr>
-                        <td>{{ credit.store.name }}</td>
+                        <td>{{ row.store_name }}</td>
                         <td>
-                            <a href="{% url 'reports:debtor_detail' credit.customer_id %}">
-                                {{ credit.customer.full_name|default:credit.customer.name }}
+                            <a href="{% url 'reports:debtor_detail' row.customer_id %}">
+                                {{ row.customer_name }}
                             </a>
                         </td>
-                        <td>{{ credit.customer.phone|default:"—" }}</td>
-                        <td>{{ credit.remaining_amount }}</td>
+                        <td>{{ row.customer_phone|default:"—" }}</td>
+                        <td>{{ row.total_debt }}</td>
+                        <td>
+                            <a
+                                href="{% url 'credits:client_debt_payment_create' %}?store={{ row.store_id }}&client={{ row.customer_id }}&amount={{ row.total_debt }}"
+                                class="btn btn--primary"
+                            >
+                                Принять оплату
+                            </a>
+                        </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="4">Активных долгов нет.</td>
+                        <td colspan="5">Активных долгов нет.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

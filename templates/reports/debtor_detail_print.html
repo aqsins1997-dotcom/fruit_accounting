@@ -105,20 +105,24 @@
                 <th>Магазин</th>
                 <th>Дата</th>
                 <th>Сумма</th>
+                <th>Способ</th>
+                <th>Сотрудник</th>
                 <th>Комментарий</th>
             </tr>
         </thead>
         <tbody>
             {% for payment in payments %}
             <tr>
-                <td>{{ payment.credit.store.name }}</td>
-                <td>{{ payment.date|date:"d.m.Y" }}</td>
+                <td>{{ payment.store.name }}</td>
+                <td>{{ payment.paid_at|date:"d.m.Y" }}</td>
                 <td>{{ payment.amount }}</td>
+                <td>{{ payment.get_payment_method_display }}</td>
+                <td>{{ payment.employee.username|default:"—" }}</td>
                 <td>{{ payment.comment|default:"—" }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="4">Оплат пока нет.</td>
+                <td colspan="6">Оплат пока нет.</td>
             </tr>
             {% endfor %}
         </tbody>

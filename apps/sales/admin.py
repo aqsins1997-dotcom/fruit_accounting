@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib import admin
 
-from .models import CashRegister, Sale, SaleItem
+from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 
 
 class SaleItemInlineForm(forms.ModelForm):
@@ -74,7 +74,7 @@ class SaleAdmin(admin.ModelAdmin):
     )
     search_fields = (
         "id",
-        "customer__full_name",
+        "customer__name",
         "customer__phone",
         "store__name",
         "comment",
@@ -126,7 +126,7 @@ class SaleItemAdmin(admin.ModelAdmin):
     search_fields = (
         "sale__id",
         "product__name",
-        "sale__customer__full_name",
+        "sale__customer__name",
     )
     readonly_fields = (
         "cost_price_per_kg",
@@ -134,6 +134,31 @@ class SaleItemAdmin(admin.ModelAdmin):
         "line_cost_total",
         "profit",
     )
+
+
+@admin.register(SaleItemBatch)
+class SaleItemBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "sale_item",
+        "purchase_item",
+        "quantity",
+        "sale_price",
+        "total_amount",
+        "created_at",
+    )
+    list_filter = (
+        "purchase_item__store",
+        "purchase_item__product",
+        "created_at",
+    )
+    search_fields = (
+        "sale_item__sale__id",
+        "sale_item__product__name",
+        "purchase_item__purchase__id",
+        "purchase_item__store__name",
+    )
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(CashRegister)

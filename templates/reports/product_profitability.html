@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Аналитика продаж товаров{% endblock %}
+{% block page_title %}Аналитика продаж товаров{% endblock %}
+{% block page_subtitle %}Средняя цена продажи, себестоимость и прибыль по товарам{% endblock %}
+
+{% block content %}
+<section class="grid" style="gap: 24px;">
+    <section class="card form-card" style="max-width: 100%;">
+        <h3 class="card__title">Фильтры</h3>
+        <form method="get" class="form-grid">
+            <div class="form-group">
+                <label for="store">Магазин</label>
+                <select name="store" id="store">
+                    <option value="">Все магазины</option>
+                    {% for store in stores %}
+                        <option value="{{ store.id }}" {% if selected_store and selected_store.id == store.id %}selected{% endif %}>
+                            {{ store.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="product">Товар</label>
+                <select name="product" id="product">
+                    <option value="">Все товары</option>
+                    {% for product in products %}
+                        <option value="{{ product.id }}" {% if selected_product and selected_product.id == product.id %}selected{% endif %}>
+                            {{ product.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="date_from">Дата от</label>
+                <input type="date" name="date_from" id="date_from" value="{{ date_from }}">
+            </div>
+
+            <div class="form-group">
+                <label for="date_to">Дата до</label>
+                <input type="date" name="date_to" id="date_to" value="{{ date_to }}">
+            </div>
+
+            <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn--primary">Показать</button>
+                <a href="{% url 'reports:product_profitability_report' %}" class="btn">Сбросить</a>
+            </div>
+        </form>
+    </section>
+
+    <section class="grid grid--3">
+        <div class="stat-card">
+            <div class="stat-card__label">Выручка</div>
+            <div class="stat-card__value">{{ summary.revenue|floatformat:2 }}</div>
+            <div class="stat-card__meta">По выбранным продажам</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Прибыль</div>
+            <div class="stat-card__value">{{ summary.profit|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выручка минус себестоимость</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card__label">Средняя цена продажи</div>
+            <div class="stat-card__value">{{ summary.average_sale_price|floatformat:2 }}</div>
+            <div class="stat-card__meta">Выручка / продано</div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Товары</h3>
+        {% if rows %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Магазин</th>
+                            <th>Товар</th>
+                            <th>Закуплено</th>
+                            <th>Продано</th>
+                            <th>Остаток</th>
+                            <th>Средняя закупочная цена</th>
+                            <th>Средняя цена продажи</th>
+                            <th>Выручка</th>
+                            <th>Себестоимость</th>
+                            <th>Прибыль</th>
+                            <th>Маржа на единицу</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.store_name }}</td>
+                            <td>{{ row.product_name }}</td>
+                            <td>{{ row.purchased_quantity }}</td>
+                            <td>{{ row.sold_quantity }}</td>
+                            <td>{{ row.stock_quantity }}</td>
+                            <td>{{ row.average_purchase_price|floatformat:2 }}</td>
+                            <td>{{ row.average_sale_price|floatformat:2 }}</td>
+                            <td>{{ row.revenue|floatformat:2 }}</td>
+                            <td>{{ row.sold_cost|floatformat:2 }}</td>
+                            <td>{{ row.profit|floatformat:2 }}</td>
+                            <td>{{ row.margin_per_unit|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="2">Итого</th>
+                            <th>{{ summary.purchased_quantity }}</th>
+                            <th>{{ summary.sold_quantity }}</th>
+                            <th>{{ summary.stock_quantity }}</th>
+                            <th>{{ summary.average_purchase_price|floatformat:2 }}</th>
+                            <th>{{ summary.average_sale_price|floatformat:2 }}</th>
+                            <th>{{ summary.revenue|floatformat:2 }}</th>
+                            <th>{{ summary.sold_cost|floatformat:2 }}</th>
+                            <th>{{ summary.profit|floatformat:2 }}</th>
+                            <th>{{ summary.margin_per_unit|floatformat:2 }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Данных пока нет</h3>
+                <p>После закупок или продаж аналитика появится здесь.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

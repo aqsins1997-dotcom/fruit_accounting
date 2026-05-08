@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+{% block page_subtitle %}Товары и средние показатели продаж{% endblock %}
+
+{% block content %}
+<section class="grid grid--2" style="gap: 24px;">
+    <section class="card form-card">
+        <h3 class="card__title">Новый товар</h3>
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="message error">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Сохранить</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="card">
+        <h3 class="card__title">Список</h3>
+        <div class="quick-actions" style="margin-bottom: 18px;">
+            <a href="{% url 'reports:product_profitability_report' %}" class="btn btn--primary">Аналитика продаж товаров</a>
+        </div>
+        {% if objects %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th>Закуплено</th>
+                            <th>Продано</th>
+                            <th>Остаток</th>
+                            <th>Средняя закупочная цена</th>
+                            <th>Средняя цена продажи</th>
+                            <th>Прибыль</th>
+                            <th>Маржа на единицу</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for obj in objects %}
+                        <tr>
+                            <td>{{ obj.name }}</td>
+                            {% if obj.profitability %}
+                                <td>{{ obj.profitability.purchased_quantity }}</td>
+                                <td>{{ obj.profitability.sold_quantity }}</td>
+                                <td>{{ obj.profitability.stock_quantity }}</td>
+                                <td>{{ obj.profitability.average_purchase_price|floatformat:2 }}</td>
+                                <td>{{ obj.profitability.average_sale_price|floatformat:2 }}</td>
+                                <td>{{ obj.profitability.profit|floatformat:2 }}</td>
+                                <td>{{ obj.profitability.margin_per_unit|floatformat:2 }}</td>
+                            {% else %}
+                                <td>0.000</td>
+                                <td>0.000</td>
+                                <td>0.000</td>
+                                <td>0.00</td>
+                                <td>0.00</td>
+                                <td>0.00</td>
+                                <td>0.00</td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>Пока пусто</h3>
+                <p>Добавьте первый товар.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}
