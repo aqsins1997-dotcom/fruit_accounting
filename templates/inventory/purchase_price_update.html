@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Изменить цену закупки{% endblock %}
+{% block page_title %}Изменить цену закупки{% endblock %}
+{% block page_subtitle %}Корректировка цены партии без изменения продаж и остатков{% endblock %}
+
+{% block content %}
+<section class="card form-card">
+    <h3 class="card__title">Партия товара</h3>
+    <div class="table-wrap" style="margin-bottom: 22px;">
+        <table class="table">
+            <tbody>
+                <tr>
+                    <th>Товар</th>
+                    <td>{{ item.product }}</td>
+                </tr>
+                <tr>
+                    <th>Поставщик</th>
+                    <td>{{ item.purchase.supplier }}</td>
+                </tr>
+                <tr>
+                    <th>Дата закупки</th>
+                    <td>{{ item.purchase.date|date:"d.m.Y" }}</td>
+                </tr>
+                <tr>
+                    <th>Количество закупки</th>
+                    <td>{{ item.quantity_kg }} кг</td>
+                </tr>
+                <tr>
+                    <th>Текущая закупочная цена</th>
+                    <td>{{ item.purchase_price_per_kg|floatformat:2 }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <form method="post" class="form-grid">
+        {% csrf_token %}
+        <div class="form-group form-group--full">
+            <label for="{{ form.purchase_price_per_kg.id_for_label }}">{{ form.purchase_price_per_kg.label }}</label>
+            {{ form.purchase_price_per_kg }}
+            {% if form.purchase_price_per_kg.errors %}
+                <div class="message error">{{ form.purchase_price_per_kg.errors|join:", " }}</div>
+            {% endif %}
+        </div>
+        {% if form.non_field_errors %}
+            <div class="form-group form-group--full">
+                <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+            </div>
+        {% endif %}
+        <div class="form-group form-group--full quick-actions">
+            <button type="submit" class="btn btn--primary">Сохранить цену</button>
+            <a href="{% url 'inventory:purchase_list' %}" class="btn">Назад к закупкам</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -31,3 +31,27 @@ class PurchaseItemCreateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["store"].queryset = Store.objects.order_by("name")
         self.fields["product"].queryset = Product.objects.order_by("name")
+
+
+class PurchaseItemPriceUpdateForm(forms.ModelForm):
+    class Meta:
+        model = PurchaseItem
+        fields = ("purchase_price_per_kg",)
+        labels = {
+            "purchase_price_per_kg": "Новая цена закупки",
+        }
+        widgets = {
+            "purchase_price_per_kg": forms.NumberInput(
+                attrs={
+                    "min": "0",
+                    "step": "0.01",
+                    "inputmode": "decimal",
+                }
+            ),
+        }
+
+    def clean_purchase_price_per_kg(self):
+        price = self.cleaned_data["purchase_price_per_kg"]
+        if price < 0:
+            raise forms.ValidationError("Новая цена закупки не может быть отрицательной.")
+        return price

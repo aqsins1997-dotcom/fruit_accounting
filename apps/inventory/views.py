@@ -1,12 +1,12 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
-from .forms import PurchaseCreateForm, PurchaseItemCreateForm
-from .models import Purchase, StoreStock
+from .forms import PurchaseCreateForm, PurchaseItemCreateForm, PurchaseItemPriceUpdateForm
+from .models import Purchase, PurchaseItem, StoreStock
 
 
 def _profitability_by_store_product():
@@ -58,6 +58,32 @@ def purchase_list(request):
             item.profitability = profitability_map.get(item.id)
 
     return render(request, "inventory/purchase_list.html", {"purchases": purchases})
+
+
+@login_required
+def purchase_item_price_update(request, pk):
+    item = get_object_or_404(
+        PurchaseItem.objects.select_related("purchase__supplier", "store", "product"),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        form = PurchaseItemPriceUpdateForm(request.POST, instance=item)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Цена закупки успешно обновлена")
+            return redirect("inventory:purchase_list")
+    else:
+        form = PurchaseItemPriceUpdateForm(instance=item)
+
+    return render(
+        request,
+        "inventory/purchase_price_update.html",
+        {
+            "form": form,
+            "item": item,
+        },
+    )
 
 
 @login_required

@@ -19,7 +19,7 @@
         </div>
 
         <nav class="sidebar__nav">
-            <div class="nav-section">
+            <div class="nav-section nav-section--main">
                 <div class="nav-section__title">Основное</div>
                 <a href="{% url 'dashboard:index' %}" class="nav-link">Дашборд</a>
                 <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
@@ -28,41 +28,36 @@
                 <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-section nav-section--directories">
                 <div class="nav-section__title">Справочники</div>
                 <a href="{% url 'core:stores_page' %}" class="nav-link">Магазины</a>
                 <a href="{% url 'core:products_page' %}" class="nav-link">Товары</a>
                 <a href="{% url 'core:suppliers_page' %}" class="nav-link">Поставщики</a>
-                <a href="{% url 'core:sellers_page' %}" class="nav-link">Сотрудники</a>
                 <a href="{% url 'core:customers_page' %}" class="nav-link">Клиенты</a>
                 <a href="{% url 'expenses:category_list' %}" class="nav-link">Категории расходов</a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-section nav-section--inventory">
                 <div class="nav-section__title">Склад</div>
                 <a href="{% url 'inventory:purchase_list' %}" class="nav-link">Закупки</a>
                 <a href="{% url 'inventory:purchase_create' %}" class="nav-link">Новая закупка</a>
                 <a href="{% url 'inventory:stock_list' %}" class="nav-link">Остатки</a>
             </div>
 
-            <div class="nav-section">
-                <div class="nav-section__title">Подотчет и расходы</div>
-                <a href="{% url 'expenses:advance_create' %}" class="nav-link">Выдать деньги сотруднику</a>
-                <a href="{% url 'expenses:expense_create' %}" class="nav-link">Добавить расход сотрудника</a>
+            <div class="nav-section nav-section--expenses">
+                <div class="nav-section__title">Расходы и сотрудники</div>
                 <a href="{% url 'expenses:store_expense_create' %}" class="nav-link">Расход магазина</a>
-                <a href="{% url 'expenses:salary_payment_create' %}" class="nav-link">Зарплата сотруднику</a>
-                <a href="{% url 'expenses:employee_report' %}" class="nav-link">Отчет по сотрудникам</a>
                 <a href="{% url 'expenses:expense_report' %}" class="nav-link">Сводка расходов</a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-section nav-section--payables">
                 <div class="nav-section__title">Поставщики</div>
                 <a href="{% url 'payables:supplier_balances' %}" class="nav-link">Долги поставщикам</a>
                 <a href="{% url 'payables:supplier_payment_create' %}" class="nav-link">Новая оплата поставщику</a>
                 <a href="{% url 'payables:supplier_payment_list' %}" class="nav-link">История оплат поставщикам</a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-section nav-section--sales">
                 <div class="nav-section__title">Продажи и долги</div>
                 <a href="{% url 'sales:sale_list' %}" class="nav-link">Продажи</a>
                 <a href="{% url 'sales:cash_registers' %}" class="nav-link">Касса</a>
@@ -72,7 +67,7 @@
                 <a href="{% url 'credits:credit_payment_list' %}" class="nav-link">История оплат клиентов</a>
             </div>
 
-            <div class="nav-section">
+            <div class="nav-section nav-section--system">
                 <div class="nav-section__title">Система</div>
                 <a href="/admin/" class="nav-link">Админка</a>
                 <a href="{% url 'logout' %}" class="nav-link nav-link--danger">Выйти</a>
@@ -110,5 +105,21 @@
         </main>
     </div>
 </div>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        function normalize(path) {
+            return path === "/" ? "/" : path.replace(/\/+$/, "");
+        }
+
+        var currentPath = normalize(window.location.pathname);
+        document.querySelectorAll(".sidebar__nav .nav-link[href]").forEach(function (link) {
+            var linkPath = normalize(new URL(link.getAttribute("href"), window.location.origin).pathname);
+            if (linkPath === currentPath) {
+                link.classList.add("nav-link--active");
+                link.setAttribute("aria-current", "page");
+            }
+        });
+    });
+</script>
 </body>
 </html>

@@ -1,9 +1,13 @@
+from urllib.parse import urlencode
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from .forms import (
     EmployeeAdvanceForm,
@@ -25,6 +29,48 @@ from .services import (
 )
 
 
+DEFAULT_EXPENSE_CATEGORIES = (
+    "Аренда",
+    "Доставка",
+    "Пакеты",
+    "Коммунальные",
+    "Ремонт",
+    "Прочее",
+)
+
+
+def _safe_next_url(request):
+    next_url = (
+        request.POST.get("next")
+        or request.GET.get("next")
+        or request.session.get("expense_category_next")
+    )
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return None
+
+
+def _create_default_expense_categories():
+    created_count = 0
+    reactivated_count = 0
+    for name in DEFAULT_EXPENSE_CATEGORIES:
+        category, created = ExpenseCategory.objects.get_or_create(
+            name=name,
+            defaults={"is_active": True},
+        )
+        if created:
+            created_count += 1
+        elif not category.is_active:
+            category.is_active = True
+            category.save(update_fields=["is_active", "updated_at"])
+            reactivated_count += 1
+    return created_count, reactivated_count
+
+
 def _attach_validation_error(form, exc):
     if hasattr(exc, "message_dict"):
         for field_name, messages_list in exc.message_dict.items():
@@ -38,11 +84,29 @@ def _attach_validation_error(form, exc):
 
 @login_required
 def category_list(request):
+    next_url = _safe_next_url(request)
+    if next_url:
+        request.session["expense_category_next"] = next_url
+
+    if request.method == "GET" and request.GET.get("create_defaults") == "1":
+        created_count, reactivated_count = _create_default_expense_categories()
+        if created_count or reactivated_count:
+            messages.success(request, "Стандартные категории расходов добавлены.")
+        else:
+            messages.success(request, "Стандартные категории расходов уже есть.")
+
+        request.session.pop("expense_category_next", None)
+        return redirect(next_url or "expenses:category_list")
+
     if request.method == "POST":
         form = ExpenseCategoryForm(request.POST)
         if form.is_valid():
             form.save()
             messages.success(request, "Категория расхода добавлена.")
+            next_url = _safe_next_url(request)
+            request.session.pop("expense_category_next", None)
+            if next_url:
+                return redirect(next_url)
             return redirect("expenses:category_list")
     else:
         form = ExpenseCategoryForm()
@@ -118,6 +182,8 @@ def expense_create(request):
 
 @login_required
 def store_expense_create(request):
+    has_expense_categories = ExpenseCategory.objects.filter(is_active=True).exists()
+
     if request.method == "POST":
         form = StoreExpenseForm(request.POST)
         if form.is_valid():
@@ -135,11 +201,17 @@ def store_expense_create(request):
         form = StoreExpenseForm()
 
     recent_store_expenses = StoreExpense.objects.select_related("store", "category").order_by("-date", "-id")[:10]
+    current_url = request.get_full_path()
+    category_query = urlencode({"next": current_url})
+    default_category_query = urlencode({"next": current_url, "create_defaults": "1"})
     return render(
         request,
         "expenses/store_expense_form.html",
         {
             "form": form,
+            "has_expense_categories": has_expense_categories,
+            "category_create_url": f"{reverse('expenses:category_list')}?{category_query}",
+            "default_categories_url": f"{reverse('expenses:category_list')}?{default_category_query}",
             "recent_store_expenses": recent_store_expenses,
         },
     )

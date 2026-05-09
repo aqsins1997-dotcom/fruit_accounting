@@ -77,16 +77,43 @@
             <h3 class="card__title">Быстрые действия</h3>
             <p class="card__subtitle">Основные рабочие операции без админки</p>
 
-            <div class="quick-actions">
-                <a href="{% url 'inventory:purchase_create' %}" class="btn btn--primary">Новая закупка</a>
-                <a href="{% url 'sales:sale_create' %}" class="btn btn--success">Новая продажа</a>
-                <a href="{% url 'sales:cash_registers' %}" class="btn">Касса</a>
-                <a href="{% url 'expenses:advance_create' %}" class="btn">Выдать деньги сотруднику</a>
-                <a href="{% url 'expenses:expense_create' %}" class="btn">Добавить расход сотрудника</a>
-                <a href="{% url 'expenses:store_expense_create' %}" class="btn">Расход магазина</a>
-                <a href="{% url 'expenses:salary_payment_create' %}" class="btn">Зарплата сотруднику</a>
-                <a href="{% url 'expenses:employee_report' %}" class="btn">Отчет по сотрудникам</a>
-                <a href="{% url 'expenses:expense_report' %}" class="btn">Сводка расходов</a>
+            <div class="action-groups">
+                <div class="action-group action-group--inventory">
+                    <div class="action-group__title">Склад</div>
+                    <div class="quick-actions">
+                        <a href="{% url 'inventory:purchase_create' %}" class="btn btn--inventory">Новая закупка</a>
+                        <a href="{% url 'inventory:purchase_list' %}" class="btn btn--inventory">Закупки</a>
+                        <a href="{% url 'inventory:stock_list' %}" class="btn btn--inventory">Остатки</a>
+                    </div>
+                </div>
+
+                <div class="action-group action-group--sales">
+                    <div class="action-group__title">Продажи</div>
+                    <div class="quick-actions">
+                        <a href="{% url 'sales:sale_create' %}" class="btn btn--sales">Новая продажа</a>
+                        <a href="{% url 'sales:sale_list' %}" class="btn btn--sales">Продажи</a>
+                        <a href="{% url 'sales:cash_registers' %}" class="btn btn--sales">Касса</a>
+                    </div>
+                </div>
+
+                <div class="action-group action-group--expenses">
+                    <div class="action-group__title">Расходы</div>
+                    <div class="quick-actions">
+                        <a href="{% url 'expenses:store_expense_create' %}" class="btn btn--expenses">Расход магазина</a>
+                        <a href="{% url 'expenses:expense_report' %}" class="btn btn--expenses">Сводка расходов</a>
+                        <a href="{% url 'expenses:category_list' %}" class="btn btn--expenses">Категории расходов</a>
+                    </div>
+                </div>
+
+                <div class="action-group action-group--debts">
+                    <div class="action-group__title">Долги</div>
+                    <div class="quick-actions">
+                        <a href="{% url 'payables:supplier_balances' %}" class="btn btn--debts">Долги поставщикам</a>
+                        <a href="{% url 'payables:supplier_payment_create' %}" class="btn btn--debts">Оплата поставщику</a>
+                        <a href="{% url 'reports:debtors_report' %}" class="btn btn--debts">Должники</a>
+                        <a href="{% url 'credits:client_debt_payment_create' %}" class="btn btn--debts">Оплата клиента</a>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -107,11 +134,7 @@
                 <span class="badge badge--success">Работает</span>
             </div>
             <div class="kpi-row">
-                <span class="kpi-row__label">Подотчет и расходы сотрудников</span>
-                <span class="badge badge--success">Работает</span>
-            </div>
-            <div class="kpi-row">
-                <span class="kpi-row__label">Расходы магазина и зарплата</span>
+                <span class="kpi-row__label">Расходы магазина</span>
                 <span class="badge badge--success">Работает</span>
             </div>
             <div class="kpi-row">
@@ -142,12 +165,10 @@
 
             <ul class="list-clean">
                 <li><a href="{% url 'expenses:category_list' %}">Категории расходов</a></li>
-                <li><a href="{% url 'expenses:advance_create' %}">Выдать деньги сотруднику</a></li>
-                <li><a href="{% url 'expenses:expense_create' %}">Добавить расход сотрудника</a></li>
                 <li><a href="{% url 'expenses:store_expense_create' %}">Расход магазина</a></li>
-                <li><a href="{% url 'expenses:salary_payment_create' %}">Зарплата сотруднику</a></li>
-                <li><a href="{% url 'expenses:employee_report' %}">Отчет по сотрудникам</a></li>
                 <li><a href="{% url 'expenses:expense_report' %}">Сводка расходов</a></li>
+                <li><a href="{% url 'payables:supplier_balances' %}">Долги поставщикам</a></li>
+                <li><a href="{% url 'credits:credit_payment_list' %}">История оплат клиентов</a></li>
             </ul>
         </div>
     </section>

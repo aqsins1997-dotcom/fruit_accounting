@@ -83,6 +83,9 @@ class StoreExpenseForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["store"].queryset = Store.objects.order_by("name")
         self.fields["category"].queryset = ExpenseCategory.objects.filter(is_active=True).order_by("name")
+        self.fields["category"].required = True
+        self.fields["category"].empty_label = "Выберите категорию расхода"
+        self.fields["category"].error_messages["required"] = "Выберите категорию расхода"
         if not self.initial.get("date"):
             self.initial["date"] = timezone.now().date()
 

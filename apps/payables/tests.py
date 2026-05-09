@@ -208,6 +208,29 @@ class SupplierBalancesViewTests(TestCase):
         allocation = SupplierPaymentAllocation.objects.get(payment=payment)
         self.assertEqual(allocation.amount, Decimal("100.00"))
 
+    def test_allocations_rebuild_when_purchase_item_price_changes(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("20.00"),
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-11",
+            amount=Decimal("150.00"),
+        )
+
+        item.purchase_price_per_kg = Decimal("10.00")
+        item.save()
+
+        allocation = SupplierPaymentAllocation.objects.get(payment=payment)
+        self.assertEqual(allocation.amount, Decimal("100.00"))
+
     def test_purchase_specific_payment_is_not_double_counted_with_general_payment(self):
         purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
         purchase_two = Purchase.objects.create(supplier=self.supplier, date="2026-04-12")

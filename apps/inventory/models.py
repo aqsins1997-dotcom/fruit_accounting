@@ -303,6 +303,7 @@ class PurchaseItem(TimeStampedModel):
             is_new = self.pk is None
 
             old_quantity = Decimal("0.000")
+            old_price = None
             old_store_id = None
             old_product_id = None
             old_supplier_id = None
@@ -310,6 +311,7 @@ class PurchaseItem(TimeStampedModel):
             if not is_new:
                 old = PurchaseItem.objects.select_for_update().select_related("purchase").get(pk=self.pk)
                 old_quantity = old.quantity_kg
+                old_price = old.purchase_price_per_kg
                 old_store_id = old.store_id
                 old_product_id = old.product_id
                 old_supplier_id = old.purchase.supplier_id
@@ -380,6 +382,11 @@ class PurchaseItem(TimeStampedModel):
                     (self.purchase.supplier_id, self.store_id),
                 }
             )
+
+            if not is_new and old_price != self.purchase_price_per_kg:
+                from apps.sales.services import recalculate_sale_costs_for_purchase_item
+
+                recalculate_sale_costs_for_purchase_item(self)
 
     def delete(self, *args, **kwargs):
         with transaction.atomic():

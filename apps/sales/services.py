@@ -3,10 +3,11 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from apps.core.models import Store
 
-from .models import CashRegister, Sale
+from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 
 ZERO = Decimal("0.00")
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
@@ -55,6 +56,63 @@ def calculate_cash_balance(store):
         - store_expenses
         - salary_payments
     )
+
+
+@transaction.atomic
+def recalculate_sale_costs_for_purchase_item(purchase_item):
+    sale_item_ids = list(
+        SaleItemBatch.objects.filter(purchase_item=purchase_item)
+        .values_list("sale_item_id", flat=True)
+        .distinct()
+    )
+    if not sale_item_ids:
+        return []
+
+    now = timezone.now()
+    changed_sale_ids = set()
+    changed_sale_item_ids = []
+
+    sale_items = (
+        SaleItem.objects.select_for_update()
+        .filter(id__in=sale_item_ids)
+        .prefetch_related("batches__purchase_item")
+    )
+    for sale_item in sale_items:
+        total_cost = sum(
+            (
+                batch.quantity * batch.purchase_item.purchase_price_per_kg
+                for batch in sale_item.batches.all()
+            ),
+            ZERO,
+        )
+        line_cost_total = _money(total_cost)
+        if sale_item.quantity_kg > Decimal("0.000"):
+            cost_price_per_kg = _money(total_cost / sale_item.quantity_kg)
+        else:
+            cost_price_per_kg = ZERO
+        profit = _money(sale_item.line_total - line_cost_total)
+
+        SaleItem.objects.filter(pk=sale_item.pk).update(
+            cost_price_per_kg=cost_price_per_kg,
+            line_cost_total=line_cost_total,
+            profit=profit,
+            updated_at=now,
+        )
+        changed_sale_ids.add(sale_item.sale_id)
+        changed_sale_item_ids.append(sale_item.id)
+
+    for sale in Sale.objects.select_for_update().filter(id__in=changed_sale_ids):
+        totals = SaleItem.objects.filter(sale=sale).aggregate(
+            total_cost=Coalesce(Sum("line_cost_total"), Value(ZERO, output_field=MONEY_FIELD)),
+            total_profit=Coalesce(Sum("profit"), Value(ZERO, output_field=MONEY_FIELD)),
+        )
+        Sale.objects.filter(pk=sale.pk).update(
+            total_cost=_money(totals["total_cost"]),
+            total_profit=_money(totals["total_profit"]),
+            updated_at=now,
+        )
+
+    return changed_sale_item_ids
 
 
 @transaction.atomic

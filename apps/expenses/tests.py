@@ -236,3 +236,70 @@ class ExpensesTests(TestCase):
         self.assertEqual(self.client.get(reverse("expenses:expense_create"), HTTP_HOST="localhost").status_code, 200)
         self.assertEqual(self.client.get(reverse("expenses:store_expense_create"), HTTP_HOST="localhost").status_code, 200)
         self.assertEqual(self.client.get(reverse("expenses:salary_payment_create"), HTTP_HOST="localhost").status_code, 200)
+
+    def test_store_expense_page_guides_user_when_categories_are_missing(self):
+        ExpenseCategory.objects.all().delete()
+
+        response = self.client.get(reverse("expenses:store_expense_create"), HTTP_HOST="localhost")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Сначала добавьте категорию расхода")
+        self.assertContains(response, "Добавить категорию")
+        self.assertContains(response, "Добавить стандартные категории")
+
+    def test_store_expense_requires_category_with_clear_error(self):
+        response = self.client.post(
+            reverse("expenses:store_expense_create"),
+            {
+                "store": self.store.id,
+                "date": self.today,
+                "amount": "10.00",
+                "comment": "",
+            },
+            HTTP_HOST="localhost",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Выберите категорию расхода")
+        self.assertFalse(StoreExpense.objects.exists())
+
+    def test_default_expense_categories_can_be_created_from_store_expense_page(self):
+        ExpenseCategory.objects.all().delete()
+
+        response = self.client.get(
+            reverse("expenses:category_list"),
+            {
+                "next": reverse("expenses:store_expense_create"),
+                "create_defaults": "1",
+            },
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+
+        self.assertRedirects(response, reverse("expenses:store_expense_create"))
+        self.assertEqual(
+            set(ExpenseCategory.objects.values_list("name", flat=True)),
+            {"Аренда", "Доставка", "Пакеты", "Коммунальные", "Ремонт", "Прочее"},
+        )
+        self.assertNotContains(response, "Сначала добавьте категорию расхода")
+
+    def test_manual_category_create_returns_to_store_expense_page(self):
+        ExpenseCategory.objects.all().delete()
+        self.client.get(
+            reverse("expenses:category_list"),
+            {"next": reverse("expenses:store_expense_create")},
+            HTTP_HOST="localhost",
+        )
+
+        response = self.client.post(
+            reverse("expenses:category_list"),
+            {
+                "name": "Пакеты",
+                "is_active": "on",
+            },
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+
+        self.assertRedirects(response, reverse("expenses:store_expense_create"))
+        self.assertTrue(ExpenseCategory.objects.filter(name="Пакеты", is_active=True).exists())

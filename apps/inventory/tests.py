@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
 from apps.reports.services import build_purchase_item_profitability_map
-from apps.sales.models import Sale, SaleItem
+from apps.sales.models import CashRegister, Sale, SaleItem
 
 from .models import Purchase, PurchaseItem, StoreStock
 
@@ -42,6 +42,7 @@ class InventoryNoAdminViewsTests(TestCase):
         purchase_response = self.client.get(reverse("inventory:purchase_list"))
         self.assertContains(purchase_response, "средняя продажа")
         self.assertContains(purchase_response, "прибыль")
+        self.assertContains(purchase_response, "Изменить цену")
 
     def test_purchase_profitability_is_calculated_per_batch(self):
         first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-06")
@@ -136,3 +137,75 @@ class InventoryNoAdminViewsTests(TestCase):
         stock = StoreStock.objects.get(store=self.store, product=self.product)
         self.assertEqual(item.quantity_kg, Decimal("10.000"))
         self.assertEqual(stock.quantity_kg, Decimal("4.000"))
+
+    def test_purchase_item_price_update_recalculates_cost_without_changing_cash_or_stock(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("330.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-02",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("4.000"),
+            sale_price_per_kg=Decimal("400.00"),
+        )
+        cash_before = CashRegister.objects.get(store=self.store).balance
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_price_update", args=[item.id]),
+            {"purchase_price_per_kg": "300.00"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Цена закупки успешно обновлена")
+
+        item.refresh_from_db()
+        sale.refresh_from_db()
+        sale_item.refresh_from_db()
+        stock = StoreStock.objects.get(store=self.store, product=self.product)
+        cash_after = CashRegister.objects.get(store=self.store).balance
+
+        self.assertEqual(item.purchase_price_per_kg, Decimal("300.00"))
+        self.assertEqual(stock.quantity_kg, Decimal("6.000"))
+        self.assertEqual(cash_after, cash_before)
+        self.assertEqual(sale_item.line_total, Decimal("1600.00"))
+        self.assertEqual(sale_item.line_cost_total, Decimal("1200.00"))
+        self.assertEqual(sale_item.profit, Decimal("400.00"))
+        self.assertEqual(sale.total_amount, Decimal("1600.00"))
+        self.assertEqual(sale.total_cost, Decimal("1200.00"))
+        self.assertEqual(sale.total_profit, Decimal("400.00"))
+
+        profitability = build_purchase_item_profitability_map(purchase_item_ids=[item.id])
+        self.assertEqual(profitability[item.id]["sold_cost"], Decimal("1200.00"))
+        self.assertEqual(profitability[item.id]["profit"], Decimal("400.00"))
+        self.assertEqual(profitability[item.id]["margin_per_unit"], Decimal("100.00"))
+
+    def test_purchase_item_price_update_rejects_negative_price(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("330.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_price_update", args=[item.id]),
+            {"purchase_price_per_kg": "-1.00"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Новая цена закупки не может быть отрицательной.")
+        item.refresh_from_db()
+        self.assertEqual(item.purchase_price_per_kg, Decimal("330.00"))

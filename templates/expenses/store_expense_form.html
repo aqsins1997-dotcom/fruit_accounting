@@ -30,8 +30,21 @@
             {% endif %}
             {% for field in form %}
                 <div class="form-group {% if field.name == 'comment' %}form-group--full{% endif %}">
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
+                    {% if field.name == "category" %}
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <a href="{{ category_create_url }}" class="btn" style="min-height: 34px; padding: 0 12px;">Добавить категорию</a>
+                        </div>
+                        {% if has_expense_categories %}
+                            {{ field }}
+                        {% else %}
+                            <div class="message warning" style="margin-bottom: 0;">Сначала добавьте категорию расхода</div>
+                            <a href="{{ default_categories_url }}" class="btn btn--primary" style="min-height: 38px;">Добавить стандартные категории</a>
+                        {% endif %}
+                    {% else %}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                    {% endif %}
                     {% if field.errors %}
                         <div class="message error">{{ field.errors|join:", " }}</div>
                     {% endif %}
