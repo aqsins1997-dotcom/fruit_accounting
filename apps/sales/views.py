@@ -51,7 +51,12 @@ def sale_create(request):
 
 @login_required
 def sale_list(request):
-    sales = Sale.objects.select_related("store", "customer").prefetch_related("items__product").order_by("-date", "-id")
+    sales = (
+        Sale.objects.select_related("store", "customer")
+        .filter(deleted_at__isnull=True)
+        .prefetch_related("items__product")
+        .order_by("-date", "-id")
+    )
     cash_registers = CashRegister.objects.select_related("store").order_by("store__name")
     return render(
         request,

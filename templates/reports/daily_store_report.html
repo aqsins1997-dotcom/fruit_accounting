@@ -310,8 +310,8 @@
                     <tbody>
                         {% for row in stock_rows %}
                         <tr>
-                            <td>{{ row.product.name }}</td>
-                            <td>{{ row.quantity_kg }}</td>
+                            <td>{{ row.product_name }}</td>
+                            <td>{{ row.stock_quantity }}</td>
                             <td>{{ row.average_purchase_price|floatformat:2 }}</td>
                         </tr>
                         {% empty %}

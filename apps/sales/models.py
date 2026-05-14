@@ -2,9 +2,16 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 
 from apps.core.models import Product, Store, Customer
-from apps.inventory.models import PurchaseItem, StoreStock, StockMovement
+from apps.inventory.models import (
+    PurchaseItem,
+    StoreStock,
+    StockMovement,
+    calculate_active_stock_quantity,
+    sync_store_stock_from_active_inventory,
+)
 
 
 class TimeStampedModel(models.Model):
@@ -113,6 +120,12 @@ class Sale(TimeStampedModel):
         default=Decimal("0.00"),
         verbose_name="Прибыль",
     )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Удалена",
+    )
 
     class Meta:
         verbose_name = "Продажа"
@@ -126,6 +139,10 @@ class Sale(TimeStampedModel):
     def __str__(self):
         return f"Продажа #{self.id} | {self.store} | {self.date}"
 
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
+
     def clean(self):
         if self.payment_type == self.PAYMENT_TYPE_CREDIT and not self.customer:
             raise ValidationError({"customer": "Для продажи в кредит нужно указать клиента."})
@@ -134,6 +151,9 @@ class Sale(TimeStampedModel):
             raise ValidationError({"customer": "Для продажи за наличные клиент не нужен."})
 
     def sync_credit(self):
+        if self.deleted_at:
+            return
+
         if self.payment_type != self.PAYMENT_TYPE_CREDIT:
             if hasattr(self, "credit"):
                 self.credit.delete()
@@ -182,6 +202,8 @@ class Sale(TimeStampedModel):
 
 
     def _cash_contribution(self):
+        if self.deleted_at:
+            return None, Decimal("0.00")
         if self.payment_type == self.PAYMENT_TYPE_CASH:
             return self.store_id, self.total_amount or Decimal("0.00")
         return None, Decimal("0.00")
@@ -220,6 +242,56 @@ class Sale(TimeStampedModel):
                 _apply_cash_register_delta(store_id=new_store_id, amount=new_cash_amount)
 
             self.sync_credit()
+
+    def delete(self, *args, **kwargs):
+        changed = self.soft_delete()
+        return (
+            1 if changed else 0,
+            {self._meta.label: 1 if changed else 0},
+        )
+
+    def soft_delete(self):
+        with transaction.atomic():
+            sale = (
+                Sale.objects.select_for_update()
+                .prefetch_related("items")
+                .get(pk=self.pk)
+            )
+            if sale.deleted_at:
+                self.deleted_at = sale.deleted_at
+                return False
+
+            items = list(
+                sale.items.select_for_update()
+                .select_related("product")
+                .order_by("id")
+            )
+            affected_pairs = {(sale.store_id, item.product_id) for item in items}
+            old_store_id, old_cash_amount = sale._cash_contribution()
+            now = timezone.now()
+
+            Sale.objects.filter(pk=sale.pk).update(deleted_at=now, updated_at=now)
+            sale.deleted_at = now
+            self.deleted_at = now
+
+            _apply_cash_register_delta(store_id=old_store_id, amount=-old_cash_amount)
+
+            for item in items:
+                StockMovement.objects.create(
+                    store=sale.store,
+                    product=item.product,
+                    movement_type="adjustment_in",
+                    quantity_kg_delta=item.quantity_kg,
+                    unit_cost=item.cost_price_per_kg,
+                    total_cost=item.line_cost_total,
+                    reference_note=f"Sale soft delete #{sale.id} item #{item.id}",
+                    date=sale.date,
+                )
+
+            for store_id, product_id in affected_pairs:
+                sync_store_stock_from_active_inventory(store_id=store_id, product_id=product_id)
+
+            return True
 
 
 class SaleItem(TimeStampedModel):
@@ -288,17 +360,15 @@ class SaleItem(TimeStampedModel):
         if self.sale_price_per_kg is not None and self.sale_price_per_kg < 0:
             raise ValidationError({"sale_price_per_kg": "Цена продажи не может быть отрицательной."})
 
+        if self.sale_id and self.sale.deleted_at:
+            raise ValidationError({"sale": "Нельзя изменять строки удаленной продажи."})
+
         if self.sale_id and self.product_id:
-            stock = StoreStock.objects.filter(
-                store=self.sale.store,
-                product=self.product,
-            ).first()
-
-            available_qty = stock.quantity_kg if stock else Decimal("0.000")
-
-            if self.pk:
-                old = SaleItem.objects.get(pk=self.pk)
-                available_qty += old.quantity_kg
+            available_qty = calculate_active_stock_quantity(
+                store_id=self.sale.store_id,
+                product_id=self.product_id,
+                exclude_sale_item_id=self.pk,
+            )
 
             if self.quantity_kg is not None and self.quantity_kg > available_qty:
                 raise ValidationError(
@@ -448,11 +518,11 @@ class SaleItem(TimeStampedModel):
             sale = Sale.objects.select_for_update().get(pk=self.sale_id)
 
             if is_new:
-                stock = StoreStock.objects.select_for_update().get(
-                    store=sale.store,
-                    product=self.product,
+                available_quantity = calculate_active_stock_quantity(
+                    store_id=sale.store_id,
+                    product_id=self.product_id,
                 )
-                _validate_available_stock(stock.quantity_kg, self.quantity_kg)
+                _validate_available_stock(available_quantity, self.quantity_kg)
 
                 self.line_total = _sale_line_total(self)
                 self.cost_price_per_kg = Decimal("0.00")
@@ -470,10 +540,6 @@ class SaleItem(TimeStampedModel):
                     "updated_at",
                 ])
 
-                stock.quantity_kg -= self.quantity_kg
-                stock.full_clean()
-                stock.save(update_fields=["quantity_kg", "updated_at"])
-
                 StockMovement.objects.create(
                     store=sale.store,
                     product=self.product,
@@ -484,78 +550,60 @@ class SaleItem(TimeStampedModel):
                     reference_note=f"Sale #{self.sale_id}",
                     date=sale.date,
                 )
+                sync_store_stock_from_active_inventory(
+                    store_id=sale.store_id,
+                    product_id=self.product_id,
+                )
             else:
                 if old_sale_store_id == sale.store_id and old_product_id == self.product_id:
-                    stock = StoreStock.objects.select_for_update().get(
-                        store=sale.store,
-                        product=self.product,
+                    available_quantity = calculate_active_stock_quantity(
+                        store_id=sale.store_id,
+                        product_id=self.product_id,
+                        exclude_sale_item_id=self.pk,
                     )
-                    new_stock_quantity = stock.quantity_kg + old_quantity - self.quantity_kg
-                    _validate_available_stock(stock.quantity_kg + old_quantity, self.quantity_kg)
+                    _validate_available_stock(available_quantity, self.quantity_kg)
 
                     self.line_total = _sale_line_total(self)
                     _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
 
                     super().save(*args, **kwargs)
-
-                    stock.quantity_kg = new_stock_quantity
-                    stock.full_clean()
-                    stock.save(update_fields=["quantity_kg", "updated_at"])
+                    sync_store_stock_from_active_inventory(
+                        store_id=sale.store_id,
+                        product_id=self.product_id,
+                    )
                 else:
-                    old_stock = StoreStock.objects.select_for_update().get(
+                    available_quantity = calculate_active_stock_quantity(
+                        store_id=sale.store_id,
+                        product_id=self.product_id,
+                    )
+                    _validate_available_stock(available_quantity, self.quantity_kg)
+
+                    self.line_total = _sale_line_total(self)
+                    _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
+
+                    super().save(*args, **kwargs)
+                    sync_store_stock_from_active_inventory(
                         store_id=old_sale_store_id,
                         product_id=old_product_id,
                     )
-                    new_stock = StoreStock.objects.select_for_update().get(
-                        store=sale.store,
-                        product=self.product,
+                    sync_store_stock_from_active_inventory(
+                        store_id=sale.store_id,
+                        product_id=self.product_id,
                     )
-                    _validate_available_stock(new_stock.quantity_kg, self.quantity_kg)
-
-                    self.line_total = _sale_line_total(self)
-                    _apply_batch_costs(self, _replace_sale_item_batches(self, sale=sale))
-
-                    super().save(*args, **kwargs)
-
-                    old_stock.quantity_kg += old_quantity
-                    old_stock.full_clean()
-                    old_stock.save(update_fields=["quantity_kg", "updated_at"])
-
-                    new_stock.quantity_kg -= self.quantity_kg
-                    new_stock.full_clean()
-                    new_stock.save(update_fields=["quantity_kg", "updated_at"])
 
             sale.recalculate_totals()
 
     def delete(self, *args, **kwargs):
         with transaction.atomic():
             sale = Sale.objects.select_for_update().get(pk=self.sale_id)
-            stock, _ = StoreStock.objects.select_for_update().get_or_create(
-                store=sale.store,
-                product=self.product,
-                defaults={
-                    "quantity_kg": Decimal("0.000"),
-                    "average_purchase_price": Decimal("0.00"),
-                },
+            if sale.deleted_at:
+                return (0, {})
+
+            changed = sale.soft_delete()
+            return (
+                1 if changed else 0,
+                {sale._meta.label: 1 if changed else 0},
             )
-
-            stock.quantity_kg += self.quantity_kg
-            stock.full_clean()
-            stock.save(update_fields=["quantity_kg", "updated_at"])
-
-            StockMovement.objects.create(
-                store=sale.store,
-                product=self.product,
-                movement_type="adjustment_in",
-                quantity_kg_delta=self.quantity_kg,
-                unit_cost=self.cost_price_per_kg,
-                total_cost=self.line_cost_total,
-                reference_note=f"Sale item delete #{self.id}",
-                date=sale.date,
-            )
-
-            super().delete(*args, **kwargs)
-            sale.recalculate_totals()
 
 
 class SaleItemBatch(TimeStampedModel):
@@ -610,6 +658,10 @@ class SaleItemBatch(TimeStampedModel):
 
         if self.sale_item_id and self.purchase_item_id:
             sale = self.sale_item.sale
+            if sale.deleted_at:
+                raise ValidationError({"sale_item": "Нельзя менять FIFO-списание удаленной продажи."})
+            if self.purchase_item.purchase.deleted_at:
+                raise ValidationError({"purchase_item": "Нельзя списывать товар с удаленной закупки."})
             if self.purchase_item.store_id != sale.store_id:
                 raise ValidationError({"purchase_item": "Партия должна относиться к магазину продажи."})
             if self.purchase_item.product_id != self.sale_item.product_id:
@@ -630,7 +682,11 @@ def _validate_available_stock(available_quantity, requested_quantity):
 
 
 def _purchase_item_allocated_quantity(purchase_item):
-    return SaleItemBatch.objects.filter(purchase_item=purchase_item).aggregate(
+    return SaleItemBatch.objects.filter(
+        purchase_item=purchase_item,
+        purchase_item__purchase__deleted_at__isnull=True,
+        sale_item__sale__deleted_at__isnull=True,
+    ).aggregate(
         total=models.Sum("quantity")
     )["total"] or Decimal("0.000")
 
@@ -644,7 +700,11 @@ def _replace_sale_item_batches(sale_item, *, sale):
 
     purchase_items = (
         PurchaseItem.objects.select_for_update()
-        .filter(store_id=sale.store_id, product_id=sale_item.product_id)
+        .filter(
+            store_id=sale.store_id,
+            product_id=sale_item.product_id,
+            purchase__deleted_at__isnull=True,
+        )
         .select_related("purchase")
         .order_by("purchase__date", "id")
     )

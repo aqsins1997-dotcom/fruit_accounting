@@ -65,24 +65,24 @@ def build_product_profitability_rows(
     date_to=None,
     group_by_store=True,
 ):
-    from apps.inventory.models import PurchaseItem, StoreStock
+    from apps.inventory.models import PurchaseItem
     from apps.sales.models import SaleItem
 
     rows = defaultdict(_base_row)
 
     purchase_values = ["product_id", "product__name"]
     sale_values = ["product_id", "product__name"]
-    stock_values = ["product_id", "product__name"]
     if group_by_store:
         purchase_values = ["store_id", "store__name", *purchase_values]
         sale_values = ["sale__store_id", "sale__store__name", *sale_values]
-        stock_values = ["store_id", "store__name", *stock_values]
 
     purchase_total_expr = ExpressionWrapper(
         F("quantity_kg") * F("purchase_price_per_kg"),
         output_field=MONEY_FIELD,
     )
-    purchase_queryset = PurchaseItem.objects.select_related("purchase", "store", "product")
+    purchase_queryset = PurchaseItem.objects.select_related("purchase", "store", "product").filter(
+        purchase__deleted_at__isnull=True
+    )
     if store:
         purchase_queryset = purchase_queryset.filter(store=store)
     if product:
@@ -109,7 +109,9 @@ def build_product_profitability_rows(
         target["purchased_quantity"] = _quantity(row["purchased_quantity"])
         target["purchase_cost"] = _money(row["purchase_cost"])
 
-    sale_queryset = SaleItem.objects.select_related("sale", "sale__store", "product")
+    sale_queryset = SaleItem.objects.select_related("sale", "sale__store", "product").filter(
+        sale__deleted_at__isnull=True
+    )
     if store:
         sale_queryset = sale_queryset.filter(sale__store=store)
     if product:
@@ -142,40 +144,11 @@ def build_product_profitability_rows(
         target["revenue"] = _money(row["revenue"])
         target["sold_cost"] = _money(row["sold_cost"])
 
-    stock_total_expr = ExpressionWrapper(
-        F("quantity_kg") * F("average_purchase_price"),
-        output_field=MONEY_FIELD,
-    )
-    stock_queryset = StoreStock.objects.select_related("store", "product")
-    if store:
-        stock_queryset = stock_queryset.filter(store=store)
-    if product:
-        stock_queryset = stock_queryset.filter(product=product)
-
-    for row in stock_queryset.values(*stock_values).annotate(
-        stock_quantity=Coalesce(
-            Sum("quantity_kg"),
-            Value(ZERO_QUANTITY, output_field=QUANTITY_FIELD),
-            output_field=QUANTITY_FIELD,
-        ),
-        stock_cost=Coalesce(
-            Sum(stock_total_expr),
-            Value(ZERO_MONEY, output_field=MONEY_FIELD),
-            output_field=MONEY_FIELD,
-        ),
-    ):
-        target = rows[_row_key(row, group_by_store=group_by_store)]
-        _set_identity(target, row, group_by_store=group_by_store)
-        target["stock_quantity"] = _quantity(row["stock_quantity"])
-        target["stock_cost"] = _money(row["stock_cost"])
-
     completed_rows = []
     for row in rows.values():
         average_purchase_price = _divide_money(row["purchase_cost"], row["purchased_quantity"])
         if average_purchase_price == ZERO_MONEY:
             average_purchase_price = _divide_money(row["sold_cost"], row["sold_quantity"])
-        if average_purchase_price == ZERO_MONEY:
-            average_purchase_price = _divide_money(row["stock_cost"], row["stock_quantity"])
 
         average_sale_price = _divide_money(row["revenue"], row["sold_quantity"])
         sold_cost = row["sold_cost"]
@@ -187,9 +160,16 @@ def build_product_profitability_rows(
         if row["sold_quantity"] > ZERO_QUANTITY:
             margin_per_unit = _money(average_sale_price - average_purchase_price)
 
+        stock_quantity = row["purchased_quantity"] - row["sold_quantity"]
+        if stock_quantity < ZERO_QUANTITY:
+            stock_quantity = ZERO_QUANTITY
+        stock_cost = _money(stock_quantity * average_purchase_price)
+
         completed_rows.append(
             {
                 **row,
+                "stock_quantity": _quantity(stock_quantity),
+                "stock_cost": stock_cost,
                 "average_purchase_price": average_purchase_price,
                 "average_sale_price": average_sale_price,
                 "sold_cost": sold_cost,
@@ -229,12 +209,18 @@ def build_purchase_item_profitability_map(*, purchase_item_ids=None, date_from=N
     from apps.inventory.models import PurchaseItem
     from apps.sales.models import SaleItemBatch
 
-    purchase_items = PurchaseItem.objects.select_related("purchase", "store", "product")
+    purchase_items = PurchaseItem.objects.select_related("purchase", "store", "product").filter(
+        purchase__deleted_at__isnull=True
+    )
     if purchase_item_ids is not None:
         purchase_items = purchase_items.filter(id__in=purchase_item_ids)
 
     purchase_item_map = {item.id: item for item in purchase_items}
-    batch_queryset = SaleItemBatch.objects.filter(purchase_item_id__in=purchase_item_map.keys())
+    batch_queryset = SaleItemBatch.objects.filter(
+        purchase_item_id__in=purchase_item_map.keys(),
+        purchase_item__purchase__deleted_at__isnull=True,
+        sale_item__sale__deleted_at__isnull=True,
+    )
     if date_from:
         batch_queryset = batch_queryset.filter(sale_item__sale__date__gte=date_from)
     if date_to:
@@ -268,6 +254,10 @@ def build_purchase_item_profitability_map(*, purchase_item_ids=None, date_from=N
         if sold_quantity > ZERO_QUANTITY:
             margin_per_unit = _money(average_sale_price - item.purchase_price_per_kg)
 
+        stock_quantity = item.quantity_kg - sold_quantity
+        if stock_quantity < ZERO_QUANTITY:
+            stock_quantity = ZERO_QUANTITY
+
         rows[item_id] = {
             "purchase_item_id": item.id,
             "store_id": item.store_id,
@@ -277,7 +267,7 @@ def build_purchase_item_profitability_map(*, purchase_item_ids=None, date_from=N
             "purchased_quantity": _quantity(item.quantity_kg),
             "purchase_price": _money(item.purchase_price_per_kg),
             "sold_quantity": sold_quantity,
-            "stock_quantity": _quantity(item.quantity_kg - sold_quantity),
+            "stock_quantity": _quantity(stock_quantity),
             "average_purchase_price": _money(item.purchase_price_per_kg),
             "average_sale_price": average_sale_price,
             "revenue": revenue,

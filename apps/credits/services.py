@@ -27,7 +27,11 @@ def get_client_debt(*, store_id=None, client_id=None, store=None, client=None, e
         return ZERO
 
     total_credit = _sum_amount(
-        Credit.objects.filter(store_id=store_id, customer_id=client_id),
+        Credit.objects.filter(
+            store_id=store_id,
+            customer_id=client_id,
+            sale__deleted_at__isnull=True,
+        ),
         "original_amount",
     )
 
@@ -40,6 +44,7 @@ def get_client_debt(*, store_id=None, client_id=None, store=None, client=None, e
         CreditPayment.objects.filter(
             credit__store_id=store_id,
             credit__customer_id=client_id,
+            credit__sale__deleted_at__isnull=True,
             client_debt_payment__isnull=True,
         )
     )
@@ -53,12 +58,14 @@ def get_client_debt(*, store_id=None, client_id=None, store=None, client=None, e
 def build_debtor_rows(*, store=None, search=""):
     from .models import ClientDebtPayment, Credit, CreditPayment
 
-    credits = Credit.objects.select_related("store", "customer").all()
+    credits = Credit.objects.select_related("store", "customer").filter(
+        sale__deleted_at__isnull=True
+    )
     client_payments = ClientDebtPayment.objects.select_related("store", "client").all()
     legacy_payments = CreditPayment.objects.filter(client_debt_payment__isnull=True).select_related(
         "credit__store",
         "credit__customer",
-    )
+    ).filter(credit__sale__deleted_at__isnull=True)
 
     if store:
         credits = credits.filter(store=store)

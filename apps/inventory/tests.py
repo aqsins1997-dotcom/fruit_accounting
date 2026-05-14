@@ -7,9 +7,9 @@ from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
 from apps.reports.services import build_purchase_item_profitability_map
-from apps.sales.models import CashRegister, Sale, SaleItem
+from apps.sales.models import CashRegister, Sale, SaleItem, SaleItemBatch
 
-from .models import Purchase, PurchaseItem, StoreStock
+from .models import Purchase, PurchaseItem, StockMovement, StoreStock
 
 
 class InventoryNoAdminViewsTests(TestCase):
@@ -209,3 +209,130 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertContains(response, "Новая цена закупки не может быть отрицательной.")
         item.refresh_from_db()
         self.assertEqual(item.purchase_price_per_kg, Decimal("330.00"))
+
+    def test_purchase_delete_is_soft_and_keeps_sales_history(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("25.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-02",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("4.000"),
+            sale_price_per_kg=Decimal("40.00"),
+        )
+
+        purchase.delete()
+
+        purchase.refresh_from_db()
+        item.refresh_from_db()
+        sale_item.refresh_from_db()
+        stock = StoreStock.objects.get(store=self.store, product=self.product)
+
+        self.assertIsNotNone(purchase.deleted_at)
+        self.assertEqual(Purchase.objects.count(), 1)
+        self.assertEqual(PurchaseItem.objects.count(), 1)
+        self.assertEqual(Sale.objects.count(), 1)
+        self.assertEqual(SaleItem.objects.count(), 1)
+        self.assertEqual(SaleItemBatch.objects.filter(sale_item=sale_item, purchase_item=item).count(), 1)
+        self.assertEqual(stock.quantity_kg, Decimal("0.000"))
+        self.assertTrue(
+            StockMovement.objects.filter(
+                movement_type="adjustment_out",
+                reference_note=f"Purchase soft delete #{purchase.id} item #{item.id}",
+            ).exists()
+        )
+
+        purchase_response = self.client.get(reverse("inventory:purchase_list"))
+        self.assertNotContains(purchase_response, "Поставщик 1")
+
+        stock_response = self.client.get(reverse("inventory:stock_list"))
+        self.assertEqual(stock_response.status_code, 200)
+        self.assertNotContains(stock_response, "NaN")
+        self.assertNotContains(stock_response, "undefined")
+
+        profitability = build_purchase_item_profitability_map(purchase_item_ids=[item.id])
+        self.assertEqual(profitability, {})
+
+    def test_soft_deleted_purchase_is_not_used_for_new_fifo_sales(self):
+        deleted_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        deleted_item = PurchaseItem.objects.create(
+            purchase=deleted_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        deleted_purchase.delete()
+
+        active_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-02")
+        active_item = PurchaseItem.objects.create(
+            purchase=active_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            purchase_price_per_kg=Decimal("20.00"),
+        )
+
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-03",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            sale_price_per_kg=Decimal("50.00"),
+        )
+
+        self.assertFalse(
+            SaleItemBatch.objects.filter(sale_item=sale_item, purchase_item=deleted_item).exists()
+        )
+        self.assertTrue(
+            SaleItemBatch.objects.filter(sale_item=sale_item, purchase_item=active_item).exists()
+        )
+
+    def test_admin_purchase_delete_soft_deletes_purchase(self):
+        self.user.is_staff = True
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_staff", "is_superuser"])
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("3.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+
+        response = self.client.post(
+            reverse("admin:inventory_purchase_delete", args=[purchase.id]),
+            {"post": "yes"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        purchase.refresh_from_db()
+        self.assertIsNotNone(purchase.deleted_at)
+        self.assertEqual(Purchase.objects.count(), 1)
+        self.assertEqual(PurchaseItem.objects.count(), 1)
+
+    def test_purchase_without_items_can_be_soft_deleted_safely(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+
+        purchase.delete()
+
+        purchase.refresh_from_db()
+        self.assertIsNotNone(purchase.deleted_at)
+        response = self.client.get(reverse("inventory:purchase_list"))
+        self.assertEqual(response.status_code, 200)

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 
 from apps.core.models import Product, Store, Supplier
 
@@ -40,7 +41,11 @@ def _weighted_average_purchase_price(*, store_id, product_id):
     total_quantity = Decimal("0.000")
     total_cost = Decimal("0.00")
 
-    for item in PurchaseItem.objects.filter(store_id=store_id, product_id=product_id):
+    for item in PurchaseItem.objects.filter(
+        store_id=store_id,
+        product_id=product_id,
+        purchase__deleted_at__isnull=True,
+    ):
         total_quantity += item.quantity_kg
         total_cost += item.quantity_kg * item.purchase_price_per_kg
 
@@ -65,9 +70,48 @@ def _get_purchase_item_allocated_quantity(purchase_item_id):
 
     from apps.sales.models import SaleItemBatch
 
-    return SaleItemBatch.objects.filter(purchase_item_id=purchase_item_id).aggregate(
+    return SaleItemBatch.objects.filter(
+        purchase_item_id=purchase_item_id,
+        purchase_item__purchase__deleted_at__isnull=True,
+        sale_item__sale__deleted_at__isnull=True,
+    ).aggregate(
         total=models.Sum("quantity")
     )["total"] or Decimal("0.000")
+
+
+def calculate_active_stock_quantity(*, store_id, product_id, exclude_sale_item_id=None):
+    if not store_id or not product_id:
+        return Decimal("0.000")
+
+    from apps.sales.models import SaleItemBatch
+
+    purchased_quantity = PurchaseItem.objects.filter(
+        store_id=store_id,
+        product_id=product_id,
+        purchase__deleted_at__isnull=True,
+    ).aggregate(total=models.Sum("quantity_kg"))["total"] or Decimal("0.000")
+
+    allocated_batches = SaleItemBatch.objects.filter(
+        purchase_item__store_id=store_id,
+        purchase_item__product_id=product_id,
+        purchase_item__purchase__deleted_at__isnull=True,
+        sale_item__sale__deleted_at__isnull=True,
+    )
+    if exclude_sale_item_id:
+        allocated_batches = allocated_batches.exclude(sale_item_id=exclude_sale_item_id)
+
+    sold_quantity = allocated_batches.aggregate(total=models.Sum("quantity"))["total"] or Decimal("0.000")
+    quantity = purchased_quantity - sold_quantity
+    if quantity < Decimal("0.000"):
+        return Decimal("0.000")
+    return quantity.quantize(Decimal("0.001"))
+
+
+def sync_store_stock_from_active_inventory(*, store_id, product_id):
+    stock = _get_or_create_locked_stock(store_id=store_id, product_id=product_id)
+    stock.quantity_kg = calculate_active_stock_quantity(store_id=store_id, product_id=product_id)
+    _save_stock(stock)
+    return stock
 
 
 class TimeStampedModel(models.Model):
@@ -87,6 +131,12 @@ class Purchase(TimeStampedModel):
     )
     date = models.DateField(verbose_name="Дата закупки")
     comment = models.TextField(blank=True, verbose_name="Комментарий")
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Удалена",
+    )
 
     class Meta:
         verbose_name = "Закупка"
@@ -99,6 +149,9 @@ class Purchase(TimeStampedModel):
     def __str__(self):
         return f"Закупка #{self.id} от {self.date}"
 
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
 
     def save(self, *args, **kwargs):
         previous_supplier_id = None
@@ -120,6 +173,69 @@ class Purchase(TimeStampedModel):
                     {(previous_supplier_id, store_id) for store_id in store_ids}
                     | {(self.supplier_id, store_id) for store_id in store_ids}
                 )
+
+    def delete(self, *args, **kwargs):
+        changed = self.soft_delete()
+        return (
+            1 if changed else 0,
+            {self._meta.label: 1 if changed else 0},
+        )
+
+    def soft_delete(self):
+        with transaction.atomic():
+            purchase = (
+                Purchase.objects.select_for_update()
+                .prefetch_related("items")
+                .get(pk=self.pk)
+            )
+            if purchase.deleted_at:
+                self.deleted_at = purchase.deleted_at
+                return False
+
+            affected_groups = set()
+            now = timezone.now()
+            items = (
+                purchase.items.select_for_update()
+                .select_related("store", "product")
+                .order_by("id")
+            )
+
+            for item in items:
+                allocated_quantity = _get_purchase_item_allocated_quantity(item.pk)
+                remaining_quantity = item.quantity_kg - allocated_quantity
+                if remaining_quantity <= Decimal("0.000"):
+                    remaining_quantity = Decimal("0.000")
+
+                affected_groups.add((purchase.supplier_id, item.store_id))
+
+                if remaining_quantity <= Decimal("0.000"):
+                    continue
+
+                stock = _get_or_create_locked_stock(
+                    store_id=item.store_id,
+                    product_id=item.product_id,
+                )
+                stock.quantity_kg -= remaining_quantity
+                if stock.quantity_kg < Decimal("0.000"):
+                    stock.quantity_kg = Decimal("0.000")
+                _save_stock(stock)
+
+                StockMovement.objects.create(
+                    store=item.store,
+                    product=item.product,
+                    movement_type="adjustment_out",
+                    quantity_kg_delta=remaining_quantity,
+                    unit_cost=item.purchase_price_per_kg,
+                    total_cost=remaining_quantity * item.purchase_price_per_kg,
+                    reference_note=f"Purchase soft delete #{purchase.id} item #{item.id}",
+                    date=timezone.localdate(),
+                )
+
+            Purchase.objects.filter(pk=purchase.pk).update(deleted_at=now, updated_at=now)
+            purchase.deleted_at = now
+            self.deleted_at = now
+            _rebuild_supplier_payment_allocations(affected_groups)
+            return True
 
 
 class PurchaseItem(TimeStampedModel):
@@ -176,6 +292,9 @@ class PurchaseItem(TimeStampedModel):
 
         if self.purchase_price_per_kg is not None and self.purchase_price_per_kg < 0:
             raise ValidationError({"purchase_price_per_kg": "Цена не может быть отрицательной."})
+
+        if self.purchase_id and self.purchase.deleted_at:
+            raise ValidationError({"purchase": "Нельзя изменять строки удаленной закупки."})
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None

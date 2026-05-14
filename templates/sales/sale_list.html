@@ -20,6 +20,7 @@
                             <th>Магазин</th>
                             <th>Тип оплаты</th>
                             <th>Клиент</th>
+                            <th>Товары / Вес</th>
                             <th>Сумма</th>
                         </tr>
                     </thead>
@@ -31,6 +32,18 @@
                             <td>{{ sale.store.name }}</td>
                             <td>{{ sale.get_payment_type_display }}</td>
                             <td>{{ sale.customer|default:"-" }}</td>
+                            <td>
+                                {% for item in sale.items.all %}
+                                    <div>
+                                        {{ item.product.name }} /
+                                        {{ item.quantity_kg|default:"0.000" }} кг /
+                                        {{ item.sale_price_per_kg|default:"0.00"|floatformat:2 }} =
+                                        {{ item.line_total|default:"0.00"|floatformat:2 }}
+                                    </div>
+                                {% empty %}
+                                    -
+                                {% endfor %}
+                            </td>
                             <td>{{ sale.total_amount|floatformat:2 }}</td>
                         </tr>
                         {% endfor %}

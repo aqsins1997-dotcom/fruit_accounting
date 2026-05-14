@@ -6,9 +6,11 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Customer, Product, Store, Supplier
+from apps.credits.services import build_debtor_rows
 from apps.expenses.models import ExpenseCategory, StoreExpense
 from apps.inventory.models import Purchase, PurchaseItem, StoreStock
 from apps.payables.models import SupplierPayment
+from apps.reports.services import build_purchase_item_profitability_map
 
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 from .services import recalculate_cash_registers
@@ -91,6 +93,114 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(item.line_cost_total, Decimal("240.00"))
         self.assertEqual(item.profit, Decimal("420.00"))
         self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("3.000"))
+
+    def test_sale_list_shows_items_with_weight_price_and_total(self):
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("30.00"),
+        )
+
+        response = self.client.get(reverse("sales:sale_list"), HTTP_HOST="localhost")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.product.name)
+        self.assertContains(response, "5,000")
+        self.assertContains(response, "30,00")
+        self.assertContains(response, "150,00")
+
+    def test_sale_delete_is_soft_and_restores_active_stock_cash_and_purchase_metrics(self):
+        product = Product.objects.create(name="Apple")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
+        purchase_item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=product,
+            quantity_kg=Decimal("30.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=product).quantity_kg, Decimal("70.000"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("600.00"))
+
+        sale.delete()
+
+        sale.refresh_from_db()
+        sale_item.refresh_from_db()
+        stock = StoreStock.objects.get(store=self.store, product=product)
+        register = CashRegister.objects.get(store=self.store)
+
+        self.assertIsNotNone(sale.deleted_at)
+        self.assertEqual(Sale.objects.filter(pk=sale.pk).count(), 1)
+        self.assertEqual(SaleItem.objects.filter(pk=sale_item.pk).count(), 1)
+        self.assertEqual(SaleItemBatch.objects.filter(sale_item=sale_item, purchase_item=purchase_item).count(), 1)
+        self.assertEqual(stock.quantity_kg, Decimal("100.000"))
+        self.assertEqual(register.balance, Decimal("0.00"))
+
+        sales_response = self.client.get(reverse("sales:sale_list"), HTTP_HOST="localhost")
+        self.assertEqual(sales_response.status_code, 200)
+        self.assertNotContains(sales_response, "Apple")
+
+        purchases_response = self.client.get(reverse("inventory:purchase_list"), HTTP_HOST="localhost")
+        self.assertEqual(purchases_response.status_code, 200)
+        self.assertNotContains(purchases_response, "NaN")
+        self.assertNotContains(purchases_response, "undefined")
+
+        profitability = build_purchase_item_profitability_map(purchase_item_ids=[purchase_item.id])
+        self.assertEqual(profitability[purchase_item.id]["sold_quantity"], Decimal("0.000"))
+        self.assertEqual(profitability[purchase_item.id]["stock_quantity"], Decimal("100.000"))
+
+        stock_response = self.client.get(reverse("inventory:stock_list"), HTTP_HOST="localhost")
+        self.assertEqual(stock_response.status_code, 200)
+        self.assertNotContains(stock_response, "NaN")
+        self.assertNotContains(stock_response, "undefined")
+
+    def test_soft_deleted_credit_sale_is_excluded_from_client_debt(self):
+        product = Product.objects.create(name="Credit Apple")
+        customer = Customer.objects.create(name="Customer A")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            customer=customer,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=product,
+            quantity_kg=Decimal("30.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+
+        self.assertEqual(build_debtor_rows()[0]["total_debt"], Decimal("600.00"))
+
+        sale.delete()
+
+        self.assertEqual(build_debtor_rows(), [])
 
     def test_cash_sale_can_be_created_from_quantity_and_total(self):
         response = self.client.post(

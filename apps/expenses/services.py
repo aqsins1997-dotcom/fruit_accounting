@@ -405,7 +405,7 @@ def build_expense_report(*, store=None, seller=None, category=None, date_from=No
         date_to=date_to,
     )
 
-    sales_queryset = Sale.objects.all()
+    sales_queryset = Sale.objects.filter(deleted_at__isnull=True)
     if store:
         sales_queryset = sales_queryset.filter(store=store)
     if date_from:

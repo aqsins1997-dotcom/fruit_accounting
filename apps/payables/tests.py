@@ -132,6 +132,27 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(payment.amount, Decimal("1000.00"))
         self.assertEqual(cash_register.balance, Decimal("4000.00"))
 
+    def test_soft_deleted_purchase_is_excluded_from_supplier_debt(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("50.00"),
+        )
+
+        purchase.delete()
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["supplier_groups"], [])
+        self.assertEqual(response.context["summary"]["total_purchases"], Decimal("0.00"))
+        self.assertEqual(response.context["summary"]["total_due"], Decimal("0.00"))
+        self.assertEqual(Purchase.objects.count(), 1)
+        self.assertEqual(PurchaseItem.objects.count(), 1)
+
     def test_supplier_payment_cannot_exceed_cash_balance_and_rolls_back(self):
         CashRegister.objects.filter(store=self.store).update(balance=Decimal("500.00"))
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")

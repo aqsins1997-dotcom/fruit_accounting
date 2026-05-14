@@ -30,6 +30,7 @@ def rebuild_supplier_payment_allocations(*, supplier_id, store_id):
     purchase_rows = list(
         PurchaseItem.objects.filter(
             purchase__supplier_id=supplier_id,
+            purchase__deleted_at__isnull=True,
             store_id=store_id,
         )
         .annotate(line_total=line_total)
@@ -163,6 +164,8 @@ class SupplierPayment(TimeStampedModel):
 
         if self.purchase_id:
             errors = {}
+            if self.purchase.deleted_at:
+                errors["purchase"] = "Нельзя привязать оплату к удаленной закупке."
             if self.purchase.supplier_id != self.supplier_id:
                 errors["purchase"] = "Закупка должна относиться к выбранному поставщику."
 

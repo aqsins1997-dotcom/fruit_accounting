@@ -32,6 +32,7 @@ def calculate_cash_balance(store):
         Sale.objects.filter(
             store=store,
             payment_type=Sale.PAYMENT_TYPE_CASH,
+            deleted_at__isnull=True,
         ),
         "total_amount",
     )
@@ -39,6 +40,7 @@ def calculate_cash_balance(store):
     legacy_credit_payments = _sum_amount(
         CreditPayment.objects.filter(
             credit__store=store,
+            credit__sale__deleted_at__isnull=True,
             client_debt_payment__isnull=True,
         )
     )
@@ -61,7 +63,10 @@ def calculate_cash_balance(store):
 @transaction.atomic
 def recalculate_sale_costs_for_purchase_item(purchase_item):
     sale_item_ids = list(
-        SaleItemBatch.objects.filter(purchase_item=purchase_item)
+        SaleItemBatch.objects.filter(
+            purchase_item=purchase_item,
+            sale_item__sale__deleted_at__isnull=True,
+        )
         .values_list("sale_item_id", flat=True)
         .distinct()
     )
@@ -74,7 +79,7 @@ def recalculate_sale_costs_for_purchase_item(purchase_item):
 
     sale_items = (
         SaleItem.objects.select_for_update()
-        .filter(id__in=sale_item_ids)
+        .filter(id__in=sale_item_ids, sale__deleted_at__isnull=True)
         .prefetch_related("batches__purchase_item")
     )
     for sale_item in sale_items:
@@ -101,7 +106,10 @@ def recalculate_sale_costs_for_purchase_item(purchase_item):
         changed_sale_ids.add(sale_item.sale_id)
         changed_sale_item_ids.append(sale_item.id)
 
-    for sale in Sale.objects.select_for_update().filter(id__in=changed_sale_ids):
+    for sale in Sale.objects.select_for_update().filter(
+        id__in=changed_sale_ids,
+        deleted_at__isnull=True,
+    ):
         totals = SaleItem.objects.filter(sale=sale).aggregate(
             total_cost=Coalesce(Sum("line_cost_total"), Value(ZERO, output_field=MONEY_FIELD)),
             total_profit=Coalesce(Sum("profit"), Value(ZERO, output_field=MONEY_FIELD)),

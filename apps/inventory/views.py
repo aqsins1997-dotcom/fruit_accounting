@@ -6,14 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
 from .forms import PurchaseCreateForm, PurchaseItemCreateForm, PurchaseItemPriceUpdateForm
-from .models import Purchase, PurchaseItem, StoreStock
-
-
-def _profitability_by_store_product():
-    return {
-        (row["store_id"], row["product_id"]): row
-        for row in build_product_profitability_rows(group_by_store=True)
-    }
+from .models import Purchase, PurchaseItem
 
 
 @login_required
@@ -44,6 +37,7 @@ def purchase_create(request):
 def purchase_list(request):
     purchases = (
         Purchase.objects.select_related("supplier")
+        .filter(deleted_at__isnull=True)
         .prefetch_related("items__store", "items__product")
         .order_by("-date", "-id")
     )
@@ -63,7 +57,9 @@ def purchase_list(request):
 @login_required
 def purchase_item_price_update(request, pk):
     item = get_object_or_404(
-        PurchaseItem.objects.select_related("purchase__supplier", "store", "product"),
+        PurchaseItem.objects.select_related("purchase__supplier", "store", "product").filter(
+            purchase__deleted_at__isnull=True
+        ),
         pk=pk,
     )
 
@@ -88,9 +84,5 @@ def purchase_item_price_update(request, pk):
 
 @login_required
 def stock_list(request):
-    stocks = StoreStock.objects.select_related("store", "product").order_by("store__name", "product__name")
-    profitability_map = _profitability_by_store_product()
-    for stock in stocks:
-        stock.profitability = profitability_map.get((stock.store_id, stock.product_id))
-
+    stocks = build_product_profitability_rows(group_by_store=True)
     return render(request, "inventory/stock_list.html", {"stocks": stocks})

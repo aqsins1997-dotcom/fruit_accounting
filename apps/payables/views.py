@@ -117,7 +117,9 @@ def supplier_balances(request):
         output_field=money_field,
     )
 
-    purchase_items = PurchaseItem.objects.annotate(line_total=line_total)
+    purchase_items = PurchaseItem.objects.filter(
+        purchase__deleted_at__isnull=True
+    ).annotate(line_total=line_total)
     if supplier:
         purchase_items = purchase_items.filter(purchase__supplier=supplier)
     if store:
@@ -172,7 +174,9 @@ def supplier_balances(request):
     allocation_columns = _table_columns(SupplierPaymentAllocation._meta.db_table) if allocation_table_exists else set()
 
     if {"payment_id", "purchase_id", "store_id", "amount"}.issubset(allocation_columns):
-        allocation_rows = SupplierPaymentAllocation.objects.values(
+        allocation_rows = SupplierPaymentAllocation.objects.filter(
+            purchase__deleted_at__isnull=True
+        ).values(
             "payment_id",
             "purchase_id",
             "store_id",

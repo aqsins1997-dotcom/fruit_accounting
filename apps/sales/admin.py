@@ -1,5 +1,7 @@
 from django import forms
 from django.contrib import admin
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 
@@ -64,12 +66,15 @@ class SaleAdmin(admin.ModelAdmin):
         "total_amount",
         "total_cost",
         "total_profit",
+        "deleted_status",
+        "deleted_at",
         "created_at",
     )
     list_filter = (
         "payment_type",
         "store",
         "date",
+        "deleted_at",
         "created_at",
     )
     search_fields = (
@@ -91,18 +96,50 @@ class SaleAdmin(admin.ModelAdmin):
         "total_amount",
         "total_cost",
         "total_profit",
+        "deleted_at",
     )
 
     readonly_fields = (
         "total_amount",
         "total_cost",
         "total_profit",
+        "deleted_at",
     )
+
+    @admin.display(description="Статус")
+    def deleted_status(self, obj):
+        return "Удалена" if obj.deleted_at else "Активна"
 
     def save_model(self, request, obj, form, change):
         if obj.payment_type == Sale.PAYMENT_TYPE_CASH:
             obj.customer = None
         super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        changed = obj.soft_delete()
+        if changed:
+            self.message_user(
+                request,
+                "Продажа помечена удаленной. Строки продажи и FIFO-история сохранены.",
+            )
+        else:
+            self.message_user(request, "Продажа уже была помечена удаленной.")
+
+    def delete_queryset(self, request, queryset):
+        changed_count = 0
+        for sale in queryset:
+            if sale.soft_delete():
+                changed_count += 1
+        self.message_user(
+            request,
+            f"Продаж помечено удаленными: {changed_count}. Строки продажи и FIFO-история сохранены.",
+        )
+
+    def response_delete(self, request, obj_display, obj_id):
+        opts = self.model._meta
+        return HttpResponseRedirect(
+            reverse(f"admin:{opts.app_label}_{opts.model_name}_changelist", current_app=self.admin_site.name)
+        )
 
 
 @admin.register(SaleItem)
@@ -121,6 +158,7 @@ class SaleItemAdmin(admin.ModelAdmin):
     list_filter = (
         "sale__store",
         "sale__payment_type",
+        "sale__deleted_at",
         "created_at",
     )
     search_fields = (
@@ -134,6 +172,24 @@ class SaleItemAdmin(admin.ModelAdmin):
         "line_cost_total",
         "profit",
     )
+
+    def delete_model(self, request, obj):
+        obj.sale.soft_delete()
+        self.message_user(
+            request,
+            "Продажа помечена удаленной. Строка продажи и FIFO-история сохранены.",
+        )
+
+    def delete_queryset(self, request, queryset):
+        sale_ids = set(queryset.values_list("sale_id", flat=True))
+        changed_count = 0
+        for sale in Sale.objects.filter(id__in=sale_ids):
+            if sale.soft_delete():
+                changed_count += 1
+        self.message_user(
+            request,
+            f"Продаж помечено удаленными: {changed_count}. Строки продажи и FIFO-история сохранены.",
+        )
 
 
 @admin.register(SaleItemBatch)
@@ -150,6 +206,7 @@ class SaleItemBatchAdmin(admin.ModelAdmin):
     list_filter = (
         "purchase_item__store",
         "purchase_item__product",
+        "sale_item__sale__deleted_at",
         "created_at",
     )
     search_fields = (

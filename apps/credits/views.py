@@ -92,7 +92,9 @@ def _selected_payment_context(request, form):
 @login_required
 def credit_payment_create(request, credit_id):
     credit = get_object_or_404(
-        Credit.objects.select_related("customer", "store"),
+        Credit.objects.select_related("customer", "store").filter(
+            sale__deleted_at__isnull=True
+        ),
         pk=credit_id,
     )
 

@@ -16,7 +16,6 @@ from apps.credits.models import ClientDebtPayment, Credit, CreditPayment
 from apps.credits.services import build_debtor_rows, summarize_debt_by_store
 from apps.expenses.models import Expense, SalaryPayment, StoreExpense
 from apps.expenses.services import build_employee_balance_report
-from apps.inventory.models import StoreStock
 from apps.sales.models import Sale
 from .services import build_product_profitability_rows, summarize_product_profitability
 
@@ -118,6 +117,7 @@ def daily_store_report(request):
         sales_qs = Sale.objects.filter(
             store=selected_store,
             date=report_date_obj,
+            deleted_at__isnull=True,
         )
 
         total_sales_amount = sales_qs.aggregate(
@@ -143,20 +143,23 @@ def daily_store_report(request):
         today_credit_clients = Credit.objects.filter(
             store=selected_store,
             sale__date=report_date_obj,
+            sale__deleted_at__isnull=True,
         ).select_related("customer", "sale").order_by("-id")
 
         current_credit_debt = Credit.objects.filter(
             store=selected_store,
+            sale__deleted_at__isnull=True,
         ).exclude(
             status=Credit.STATUS_PAID
         ).aggregate(
             total=Sum("remaining_amount")
         )["total"] or Decimal("0.00")
 
-        stock_rows = StoreStock.objects.filter(
-            store=selected_store,
-            quantity_kg__gt=0,
-        ).select_related("product").order_by("product__name")
+        stock_rows = [
+            row
+            for row in build_product_profitability_rows(store=selected_store, group_by_store=True)
+            if row["stock_quantity"] > Decimal("0.000")
+        ]
 
         sale_rows = sales_qs.select_related("customer").order_by("-id")
 
@@ -356,6 +359,7 @@ def debtor_detail(request, customer_id):
 
     credits = (
         Credit.objects.filter(customer_id=customer_id)
+        .filter(sale__deleted_at__isnull=True)
         .select_related("customer", "store", "sale")
         .prefetch_related(
             Prefetch(
@@ -373,6 +377,7 @@ def debtor_detail(request, customer_id):
     )
     legacy_payments = CreditPayment.objects.filter(
         credit__customer_id=customer_id,
+        credit__sale__deleted_at__isnull=True,
         client_debt_payment__isnull=True,
     )
 
@@ -418,6 +423,7 @@ def debtor_detail_print(request, customer_id):
 
     credits = (
         Credit.objects.filter(customer_id=customer_id)
+        .filter(sale__deleted_at__isnull=True)
         .select_related("customer", "store", "sale")
         .order_by("-created_at", "-id")
     )
@@ -429,6 +435,7 @@ def debtor_detail_print(request, customer_id):
     legacy_payments = (
         CreditPayment.objects.filter(
             credit__customer_id=customer_id,
+            credit__sale__deleted_at__isnull=True,
             client_debt_payment__isnull=True,
         )
         .select_related("credit", "credit__store")
@@ -496,7 +503,7 @@ def mobile_debtors(request):
     search = request.GET.get("q", "").strip()
 
     credits = (
-        Credit.objects.filter(remaining_amount__gt=0)
+        Credit.objects.filter(remaining_amount__gt=0, sale__deleted_at__isnull=True)
         .select_related("customer", "store", "sale")
         .order_by("store__name", "-remaining_amount", "-sale__date", "-id")
     )
@@ -527,7 +534,7 @@ def mobile_debtor_detail(request, credit_id):
     credit = get_object_or_404(
         Credit.objects.select_related("customer", "store", "sale").prefetch_related(
             Prefetch("payments", queryset=CreditPayment.objects.order_by("-date", "-id"))
-        ),
+        ).filter(sale__deleted_at__isnull=True),
         pk=credit_id,
     )
 
@@ -541,7 +548,9 @@ def mobile_debtor_detail(request, credit_id):
 @login_required
 def mobile_credit_payment_add(request, credit_id):
     credit = get_object_or_404(
-        Credit.objects.select_related("customer", "store", "sale"),
+        Credit.objects.select_related("customer", "store", "sale").filter(
+            sale__deleted_at__isnull=True
+        ),
         pk=credit_id,
     )
 

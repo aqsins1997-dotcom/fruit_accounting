@@ -211,7 +211,11 @@ class ClientDebtPayment(TimeStampedModel):
         remaining_to_allocate = self.amount
         credits = (
             Credit.objects.select_for_update()
-            .filter(store_id=self.store_id, customer_id=self.client_id)
+            .filter(
+                store_id=self.store_id,
+                customer_id=self.client_id,
+                sale__deleted_at__isnull=True,
+            )
             .exclude(status=Credit.STATUS_PAID)
             .order_by("sale__date", "id")
         )
@@ -246,7 +250,11 @@ class ClientDebtPayment(TimeStampedModel):
             if self.store_id and self.client_id:
                 list(
                     Credit.objects.select_for_update()
-                    .filter(store_id=self.store_id, customer_id=self.client_id)
+                    .filter(
+                        store_id=self.store_id,
+                        customer_id=self.client_id,
+                        sale__deleted_at__isnull=True,
+                    )
                     .values_list("id", flat=True)
                 )
                 list(
@@ -316,6 +324,9 @@ class CreditPayment(TimeStampedModel):
     def clean(self):
         if self.amount <= 0:
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
+
+        if self.credit_id and self.credit.sale.deleted_at:
+            raise ValidationError({"credit": "Нельзя внести оплату по удаленной продаже."})
 
         remaining_before = self.credit.remaining_amount
         if self.pk:

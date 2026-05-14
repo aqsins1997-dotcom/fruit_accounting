@@ -13,7 +13,9 @@ class SupplierPaymentCreateForm(forms.ModelForm):
         self.fields["supplier"].queryset = Supplier.objects.order_by("name")
         self.fields["store"].queryset = Store.objects.order_by("name")
 
-        purchases = Purchase.objects.select_related("supplier").order_by("-date", "-id")
+        purchases = Purchase.objects.select_related("supplier").filter(
+            deleted_at__isnull=True
+        ).order_by("-date", "-id")
         if supplier_id:
             purchases = purchases.filter(supplier_id=supplier_id)
             self.initial.setdefault("supplier", supplier_id)
