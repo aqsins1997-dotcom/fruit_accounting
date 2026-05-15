@@ -103,7 +103,7 @@ def get_expenses_queryset(*, store=None, seller=None, category=None, date_from=N
 
 
 def get_store_expenses_queryset(*, store=None, category=None, date_from=None, date_to=None):
-    queryset = StoreExpense.objects.select_related("store", "category").all()
+    queryset = StoreExpense.objects.select_related("store", "category").filter(deleted_at__isnull=True)
     if store:
         queryset = queryset.filter(store=store)
     if category:
@@ -204,11 +204,18 @@ def save_store_expense(store_expense):
     previous_instance = None
     if store_expense.pk:
         previous_instance = StoreExpense.objects.get(pk=store_expense.pk)
+        if previous_instance.deleted_at:
+            raise ValidationError("Cannot edit a deleted store expense.")
 
     store_expense.full_clean()
     _apply_cash_outflow(store_expense, previous_instance=previous_instance)
     store_expense.save()
     return store_expense
+
+
+@transaction.atomic
+def delete_store_expense(store_expense):
+    return store_expense.soft_delete()
 
 
 @transaction.atomic
@@ -548,6 +555,8 @@ def build_expense_report(*, store=None, seller=None, category=None, date_from=No
     for expense in employee_expense_queryset:
         detailed_rows.append(
             {
+                "id": expense.id,
+                "kind": "employee",
                 "date": expense.date,
                 "type_label": "Расход сотрудника",
                 "store_name": expense.store.name,
@@ -561,6 +570,8 @@ def build_expense_report(*, store=None, seller=None, category=None, date_from=No
     for store_expense in store_expense_queryset:
         detailed_rows.append(
             {
+                "id": store_expense.id,
+                "kind": "store",
                 "date": store_expense.date,
                 "type_label": "Расход магазина",
                 "store_name": store_expense.store.name,
@@ -574,6 +585,8 @@ def build_expense_report(*, store=None, seller=None, category=None, date_from=No
     for salary_payment in salary_queryset:
         detailed_rows.append(
             {
+                "id": salary_payment.id,
+                "kind": "salary",
                 "date": salary_payment.date,
                 "type_label": "Зарплата",
                 "store_name": salary_payment.store.name,

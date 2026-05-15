@@ -4,10 +4,11 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from .forms import (
     EmployeeAdvanceForm,
@@ -22,6 +23,7 @@ from .models import EmployeeAdvance, Expense, ExpenseCategory, SalaryPayment, St
 from .services import (
     build_employee_balance_report,
     build_expense_report,
+    delete_store_expense,
     save_employee_advance,
     save_expense,
     save_salary_payment,
@@ -200,7 +202,11 @@ def store_expense_create(request):
     else:
         form = StoreExpenseForm()
 
-    recent_store_expenses = StoreExpense.objects.select_related("store", "category").order_by("-date", "-id")[:10]
+    recent_store_expenses = (
+        StoreExpense.objects.select_related("store", "category")
+        .filter(deleted_at__isnull=True)
+        .order_by("-date", "-id")[:10]
+    )
     current_url = request.get_full_path()
     category_query = urlencode({"next": current_url})
     default_category_query = urlencode({"next": current_url, "create_defaults": "1"})
@@ -212,9 +218,23 @@ def store_expense_create(request):
             "has_expense_categories": has_expense_categories,
             "category_create_url": f"{reverse('expenses:category_list')}?{category_query}",
             "default_categories_url": f"{reverse('expenses:category_list')}?{default_category_query}",
+            "current_url": current_url,
             "recent_store_expenses": recent_store_expenses,
         },
     )
+
+
+@login_required
+@require_POST
+def store_expense_delete(request, pk):
+    store_expense = get_object_or_404(
+        StoreExpense.objects.select_related("store", "category").filter(deleted_at__isnull=True),
+        pk=pk,
+    )
+    delete_store_expense(store_expense)
+    messages.success(request, "Р Р°СЃС…РѕРґ РјР°РіР°Р·РёРЅР° СѓРґР°Р»РµРЅ, СЃСѓРјРјР° РІРµСЂРЅСѓС‚Р° РІ РєР°СЃСЃСѓ.")
+    next_url = _safe_next_url(request)
+    return redirect(next_url or "expenses:store_expense_create")
 
 
 @login_required
@@ -295,6 +315,7 @@ def expense_report(request):
         "expenses/expense_report.html",
         {
             "filter_form": filter_form,
+            "current_url": request.get_full_path(),
             **report,
         },
     )

@@ -2,7 +2,8 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from apps.core.models import Seller, Store
 
@@ -240,6 +241,12 @@ class StoreExpense(CashDocumentBase):
         blank=True,
         verbose_name="Создал",
     )
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Удален",
+    )
 
     class Meta:
         verbose_name = "Расход магазина"
@@ -251,6 +258,36 @@ class StoreExpense(CashDocumentBase):
 
     def __str__(self):
         return f"{self.store} | {self.category} | {self.amount}"
+
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
+
+    def delete(self, *args, **kwargs):
+        changed = self.soft_delete()
+        return (
+            1 if changed else 0,
+            {self._meta.label: 1 if changed else 0},
+        )
+
+    def soft_delete(self):
+        with transaction.atomic():
+            expense = StoreExpense.objects.select_for_update().select_related("store").get(pk=self.pk)
+            if expense.deleted_at:
+                self.deleted_at = expense.deleted_at
+                return False
+
+            from .services import _get_cash_register, _save_cash_register
+
+            register = _get_cash_register(expense.store)
+            register.balance += expense.amount
+            _save_cash_register(register)
+
+            now = timezone.now()
+            StoreExpense.objects.filter(pk=expense.pk).update(deleted_at=now, updated_at=now)
+            expense.deleted_at = now
+            self.deleted_at = now
+            return True
 
 
 class SalaryPayment(CashDocumentBase):

@@ -11,7 +11,13 @@ from apps.inventory.models import Purchase, PurchaseItem
 from apps.sales.models import CashRegister, Sale, SaleItem
 
 from .models import EmployeeAdvance, Expense, ExpenseCategory, SalaryPayment, StoreExpense
-from .services import save_employee_advance, save_expense, save_salary_payment, save_store_expense
+from .services import (
+    delete_store_expense,
+    save_employee_advance,
+    save_expense,
+    save_salary_payment,
+    save_store_expense,
+)
 
 
 class ExpensesTests(TestCase):
@@ -230,6 +236,54 @@ class ExpensesTests(TestCase):
 
         cash_register = CashRegister.objects.get(store=self.store)
         self.assertEqual(cash_register.balance, Decimal("330.00"))
+
+    def test_store_expense_soft_delete_restores_cash_and_excludes_reports(self):
+        store_expense = StoreExpense(
+            store=self.store,
+            category=self.category,
+            date=self.today,
+            amount=Decimal("100.00"),
+            created_by=self.user,
+        )
+        save_store_expense(store_expense)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("400.00"))
+
+        delete_store_expense(store_expense)
+
+        store_expense.refresh_from_db()
+        self.assertIsNotNone(store_expense.deleted_at)
+        self.assertEqual(StoreExpense.objects.count(), 1)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("500.00"))
+
+        report_response = self.client.get(reverse("expenses:expense_report"), HTTP_HOST="localhost")
+        self.assertEqual(report_response.status_code, 200)
+        self.assertEqual(report_response.context["summary"]["store_expenses"], Decimal("0.00"))
+        self.assertEqual(report_response.context["summary"]["total_expense_count"], 0)
+
+        dashboard_response = self.client.get(reverse("dashboard:index"), HTTP_HOST="localhost")
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(dashboard_response.context["stats"]["today_total_expenses"], Decimal("0.00"))
+
+    def test_store_expense_can_be_deleted_from_interface(self):
+        store_expense = StoreExpense(
+            store=self.store,
+            category=self.category,
+            date=self.today,
+            amount=Decimal("100.00"),
+            created_by=self.user,
+        )
+        save_store_expense(store_expense)
+
+        response = self.client.post(
+            reverse("expenses:store_expense_delete", args=[store_expense.id]),
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        store_expense.refresh_from_db()
+        self.assertIsNotNone(store_expense.deleted_at)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("500.00"))
 
     def test_new_expense_pages_open(self):
         self.assertEqual(self.client.get(reverse("expenses:advance_create"), HTTP_HOST="localhost").status_code, 200)

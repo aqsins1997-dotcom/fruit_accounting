@@ -69,7 +69,7 @@ def build_cash_breakdown(store):
     )
     supplier_payments = _sum_amount(SupplierPayment.objects.filter(store=store))
     employee_advances = _sum_amount(EmployeeAdvance.objects.filter(store=store))
-    store_expenses = _sum_amount(StoreExpense.objects.filter(store=store))
+    store_expenses = _sum_amount(StoreExpense.objects.filter(store=store, deleted_at__isnull=True))
     salary_payments = _sum_amount(SalaryPayment.objects.filter(store=store))
 
     formula_balance = _money(

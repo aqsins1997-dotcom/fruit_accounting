@@ -1,7 +1,13 @@
 from django.contrib import admin
 
 from .models import EmployeeAdvance, Expense, ExpenseCategory, SalaryPayment, StoreExpense
-from .services import save_employee_advance, save_expense, save_salary_payment, save_store_expense
+from .services import (
+    delete_store_expense,
+    save_employee_advance,
+    save_expense,
+    save_salary_payment,
+    save_store_expense,
+)
 
 
 @admin.register(ExpenseCategory)
@@ -57,8 +63,8 @@ class ExpenseAdmin(admin.ModelAdmin):
 
 @admin.register(StoreExpense)
 class StoreExpenseAdmin(admin.ModelAdmin):
-    list_display = ("id", "date", "store", "category", "amount", "created_by", "created_at")
-    list_filter = ("store", "category", "date", "created_at")
+    list_display = ("id", "date", "store", "category", "amount", "deleted_at", "created_by", "created_at")
+    list_filter = ("store", "category", "date", "deleted_at", "created_at")
     search_fields = ("store__name", "category__name", "comment")
     date_hierarchy = "date"
 
@@ -66,6 +72,13 @@ class StoreExpenseAdmin(admin.ModelAdmin):
         if request.user.is_authenticated and not obj.created_by_id:
             obj.created_by = request.user
         save_store_expense(obj)
+
+    def delete_model(self, request, obj):
+        delete_store_expense(obj)
+
+    def delete_queryset(self, request, queryset):
+        for obj in queryset.filter(deleted_at__isnull=True):
+            delete_store_expense(obj)
 
 
 @admin.register(SalaryPayment)

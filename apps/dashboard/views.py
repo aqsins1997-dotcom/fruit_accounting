@@ -29,14 +29,17 @@ def index(request):
     total_cash = CashRegister.objects.aggregate(total=Sum("balance"))["total"] or Decimal("0.00")
 
     today_employee_expenses = Expense.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
-    today_store_expenses = StoreExpense.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    today_store_expenses = StoreExpense.objects.filter(
+        date=today,
+        deleted_at__isnull=True,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     today_salary_payments = SalaryPayment.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     today_advances = EmployeeAdvance.objects.filter(date=today).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
     today_total_expenses = today_employee_expenses + today_store_expenses + today_salary_payments
     today_expense_count = (
         Expense.objects.filter(date=today).count()
-        + StoreExpense.objects.filter(date=today).count()
+        + StoreExpense.objects.filter(date=today, deleted_at__isnull=True).count()
         + SalaryPayment.objects.filter(date=today).count()
     )
 

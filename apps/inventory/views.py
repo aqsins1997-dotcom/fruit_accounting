@@ -5,7 +5,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
-from .forms import PurchaseCreateForm, PurchaseItemCreateForm, PurchaseItemPriceUpdateForm
+from .forms import (
+    PurchaseCreateForm,
+    PurchaseItemCreateForm,
+    PurchaseItemPriceUpdateForm,
+    PurchaseItemQuantityUpdateForm,
+)
 from .models import Purchase, PurchaseItem
 
 
@@ -78,6 +83,42 @@ def purchase_item_price_update(request, pk):
         {
             "form": form,
             "item": item,
+        },
+    )
+
+
+@login_required
+def purchase_item_quantity_update(request, pk):
+    with transaction.atomic():
+        item = get_object_or_404(
+            PurchaseItem.objects.select_for_update().select_related(
+                "purchase__supplier",
+                "store",
+                "product",
+            ).filter(purchase__deleted_at__isnull=True),
+            pk=pk,
+        )
+
+        if request.method == "POST":
+            form = PurchaseItemQuantityUpdateForm(request.POST, instance=item)
+            if form.is_valid():
+                form.save()
+                messages.success(request, "Вес закупки успешно обновлен")
+                return redirect("inventory:purchase_list")
+        else:
+            form = PurchaseItemQuantityUpdateForm(instance=item)
+
+    return render(
+        request,
+        "inventory/purchase_quantity_update.html",
+        {
+            "form": form,
+            "item": item,
+            "sold_quantity": form.sold_quantity,
+            "current_stock_quantity": form.current_stock_quantity,
+            "paid_amount": form.paid_amount,
+            "current_purchase_total": form.current_purchase_total_for_store,
+            "new_purchase_total": form.new_purchase_total_for_store,
         },
     )
 

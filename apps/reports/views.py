@@ -171,6 +171,7 @@ def daily_store_report(request):
         store_expense_queryset = StoreExpense.objects.filter(
             store=selected_store,
             date=report_date_obj,
+            deleted_at__isnull=True,
         ).select_related("category").order_by("-id")
 
         salary_queryset = SalaryPayment.objects.filter(

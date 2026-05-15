@@ -68,6 +68,7 @@
                             <th>Категория</th>
                             <th>Сумма</th>
                             <th>Комментарий</th>
+                            <th>Действие</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -78,6 +79,17 @@
                             <td>{{ expense.category.name }}</td>
                             <td>{{ expense.amount|floatformat:2 }}</td>
                             <td>{{ expense.comment|default:"—" }}</td>
+                            <td>
+                                <form
+                                    method="post"
+                                    action="{% url 'expenses:store_expense_delete' expense.id %}"
+                                    onsubmit="return confirm('Удалить расход магазина? Сумма вернется в кассу.');"
+                                >
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ current_url }}">
+                                    <button type="submit" class="btn" style="min-height: 32px; padding: 0 12px;">Удалить</button>
+                                </form>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

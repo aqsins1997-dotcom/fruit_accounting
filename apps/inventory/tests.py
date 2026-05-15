@@ -6,6 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
+from apps.payables.models import SupplierPayment, SupplierPaymentAllocation
 from apps.reports.services import build_purchase_item_profitability_map
 from apps.sales.models import CashRegister, Sale, SaleItem, SaleItemBatch
 
@@ -209,6 +210,91 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertContains(response, "Новая цена закупки не может быть отрицательной.")
         item.refresh_from_db()
         self.assertEqual(item.purchase_price_per_kg, Decimal("330.00"))
+
+    def test_purchase_item_quantity_update_rejects_below_sold_and_recalculates_stock_and_debt(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-02",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("300.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-05-03",
+            amount=Decimal("1000.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_quantity_update", args=[item.id]),
+            {"quantity_kg": "250.000"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Минимум: 300.000 кг")
+        item.refresh_from_db()
+        self.assertEqual(item.quantity_kg, Decimal("500.000"))
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_quantity_update", args=[item.id]),
+            {"quantity_kg": "400.000"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item.refresh_from_db()
+        stock = StoreStock.objects.get(store=self.store, product=self.product)
+        self.assertEqual(item.quantity_kg, Decimal("400.000"))
+        self.assertEqual(stock.quantity_kg, Decimal("100.000"))
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["purchase_total"], Decimal("4000.00"))
+        self.assertEqual(group["paid_amount"], Decimal("1000.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("3000.00"))
+        self.assertEqual(SupplierPaymentAllocation.objects.get(purchase=purchase).amount, Decimal("1000.00"))
+
+    def test_purchase_item_quantity_update_rejects_total_below_paid_amount(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        CashRegister.objects.create(store=self.store, balance=Decimal("10000.00"))
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-05-03",
+            amount=Decimal("4000.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_quantity_update", args=[item.id]),
+            {"quantity_kg": "300.000"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Оплачено: 4000.00")
+        item.refresh_from_db()
+        self.assertEqual(item.quantity_kg, Decimal("500.000"))
 
     def test_purchase_delete_is_soft_and_keeps_sales_history(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
