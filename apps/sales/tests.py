@@ -8,9 +8,9 @@ from django.urls import reverse
 from apps.core.models import Customer, Product, Store, Supplier
 from apps.credits.services import build_debtor_rows
 from apps.expenses.models import ExpenseCategory, StoreExpense
-from apps.inventory.models import Purchase, PurchaseItem, StoreStock
+from apps.inventory.models import Purchase, PurchaseItem, StoreStock, calculate_active_stock_quantity
 from apps.payables.models import SupplierPayment
-from apps.reports.services import build_purchase_item_profitability_map
+from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 from .services import recalculate_cash_registers
@@ -166,11 +166,78 @@ class SalesNoAdminViewsTests(TestCase):
         profitability = build_purchase_item_profitability_map(purchase_item_ids=[purchase_item.id])
         self.assertEqual(profitability[purchase_item.id]["sold_quantity"], Decimal("0.000"))
         self.assertEqual(profitability[purchase_item.id]["stock_quantity"], Decimal("100.000"))
+        self.assertEqual(profitability[purchase_item.id]["revenue"], Decimal("0.00"))
+        self.assertEqual(profitability[purchase_item.id]["sold_cost"], Decimal("0.00"))
+        self.assertEqual(profitability[purchase_item.id]["profit"], Decimal("0.00"))
+
+        product_rows = build_product_profitability_rows(store=self.store, product=product)
+        self.assertEqual(product_rows[0]["sold_quantity"], Decimal("0.000"))
+        self.assertEqual(product_rows[0]["sold_cost"], Decimal("0.00"))
+        self.assertEqual(product_rows[0]["profit"], Decimal("0.00"))
 
         stock_response = self.client.get(reverse("inventory:stock_list"), HTTP_HOST="localhost")
         self.assertEqual(stock_response.status_code, 200)
         self.assertNotContains(stock_response, "NaN")
         self.assertNotContains(stock_response, "undefined")
+
+    def test_sale_with_total_amount_but_no_items_does_not_break_pages(self):
+        Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+            total_amount=Decimal("15900.00"),
+        )
+
+        sales_response = self.client.get(reverse("sales:sale_list"), HTTP_HOST="localhost")
+        self.assertEqual(sales_response.status_code, 200)
+        self.assertContains(sales_response, "Нет строк продажи")
+        self.assertContains(sales_response, "15900,00")
+
+        stock_response = self.client.get(reverse("inventory:stock_list"), HTTP_HOST="localhost")
+        self.assertEqual(stock_response.status_code, 200)
+        self.assertNotContains(stock_response, "NaN")
+        self.assertNotContains(stock_response, "undefined")
+
+        report_response = self.client.get(reverse("reports:product_profitability_report"), HTTP_HOST="localhost")
+        self.assertEqual(report_response.status_code, 200)
+        self.assertNotContains(report_response, "NaN")
+        self.assertNotContains(report_response, "undefined")
+
+    def test_stock_uses_active_sale_items_when_fifo_allocation_is_incomplete(self):
+        product = Product.objects.create(name="Batch mismatch product")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
+        purchase_item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-21",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=product,
+            quantity_kg=Decimal("30.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+        SaleItemBatch.objects.filter(sale_item=sale_item, purchase_item=purchase_item).update(
+            quantity=Decimal("20.000"),
+            total_amount=Decimal("400.00"),
+        )
+
+        self.assertEqual(
+            calculate_active_stock_quantity(store_id=self.store.id, product_id=product.id),
+            Decimal("70.000"),
+        )
+        product_row = build_product_profitability_rows(store=self.store, product=product)[0]
+        self.assertEqual(product_row["sold_quantity"], Decimal("30.000"))
+        self.assertEqual(product_row["stock_quantity"], Decimal("70.000"))
+        self.assertEqual(product_row["sold_cost"], Decimal("200.00"))
+        self.assertEqual(product_row["profit"], Decimal("400.00"))
 
     def test_soft_deleted_credit_sale_is_excluded_from_client_debt(self):
         product = Product.objects.create(name="Credit Apple")

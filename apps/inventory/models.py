@@ -83,7 +83,7 @@ def calculate_active_stock_quantity(*, store_id, product_id, exclude_sale_item_i
     if not store_id or not product_id:
         return Decimal("0.000")
 
-    from apps.sales.models import SaleItemBatch
+    from apps.sales.models import SaleItem
 
     purchased_quantity = PurchaseItem.objects.filter(
         store_id=store_id,
@@ -91,16 +91,15 @@ def calculate_active_stock_quantity(*, store_id, product_id, exclude_sale_item_i
         purchase__deleted_at__isnull=True,
     ).aggregate(total=models.Sum("quantity_kg"))["total"] or Decimal("0.000")
 
-    allocated_batches = SaleItemBatch.objects.filter(
-        purchase_item__store_id=store_id,
-        purchase_item__product_id=product_id,
-        purchase_item__purchase__deleted_at__isnull=True,
-        sale_item__sale__deleted_at__isnull=True,
+    sale_items = SaleItem.objects.filter(
+        sale__store_id=store_id,
+        product_id=product_id,
+        sale__deleted_at__isnull=True,
     )
     if exclude_sale_item_id:
-        allocated_batches = allocated_batches.exclude(sale_item_id=exclude_sale_item_id)
+        sale_items = sale_items.exclude(id=exclude_sale_item_id)
 
-    sold_quantity = allocated_batches.aggregate(total=models.Sum("quantity"))["total"] or Decimal("0.000")
+    sold_quantity = sale_items.aggregate(total=models.Sum("quantity_kg"))["total"] or Decimal("0.000")
     quantity = purchased_quantity - sold_quantity
     if quantity < Decimal("0.000"):
         return Decimal("0.000")

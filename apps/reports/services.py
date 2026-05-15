@@ -66,7 +66,7 @@ def build_product_profitability_rows(
     group_by_store=True,
 ):
     from apps.inventory.models import PurchaseItem
-    from apps.sales.models import SaleItem
+    from apps.sales.models import SaleItem, SaleItemBatch
 
     rows = defaultdict(_base_row)
 
@@ -132,16 +132,59 @@ def build_product_profitability_rows(
             Value(ZERO_MONEY, output_field=MONEY_FIELD),
             output_field=MONEY_FIELD,
         ),
-        sold_cost=Coalesce(
-            Sum("line_cost_total"),
-            Value(ZERO_MONEY, output_field=MONEY_FIELD),
-            output_field=MONEY_FIELD,
-        ),
     ):
         target = rows[_row_key(row, group_by_store=group_by_store, store_prefix="sale__")]
         _set_identity(target, row, group_by_store=group_by_store, store_prefix="sale__")
         target["sold_quantity"] = _quantity(row["sold_quantity"])
         target["revenue"] = _money(row["revenue"])
+
+    batch_cost_values = ["sale_item__product_id", "sale_item__product__name"]
+    if group_by_store:
+        batch_cost_values = ["sale_item__sale__store_id", "sale_item__sale__store__name", *batch_cost_values]
+
+    batch_cost_expr = ExpressionWrapper(
+        F("quantity") * F("purchase_item__purchase_price_per_kg"),
+        output_field=MONEY_FIELD,
+    )
+    batch_cost_queryset = SaleItemBatch.objects.select_related(
+        "sale_item__sale",
+        "sale_item__product",
+        "purchase_item__purchase",
+    ).filter(
+        sale_item__sale__deleted_at__isnull=True,
+        purchase_item__purchase__deleted_at__isnull=True,
+    )
+    if store:
+        batch_cost_queryset = batch_cost_queryset.filter(sale_item__sale__store=store)
+    if product:
+        batch_cost_queryset = batch_cost_queryset.filter(sale_item__product=product)
+    if date_from:
+        batch_cost_queryset = batch_cost_queryset.filter(sale_item__sale__date__gte=date_from)
+    if date_to:
+        batch_cost_queryset = batch_cost_queryset.filter(sale_item__sale__date__lte=date_to)
+
+    for row in batch_cost_queryset.values(*batch_cost_values).annotate(
+        sold_cost=Coalesce(
+            Sum(batch_cost_expr),
+            Value(ZERO_MONEY, output_field=MONEY_FIELD),
+            output_field=MONEY_FIELD,
+        ),
+    ):
+        target = rows[
+            _row_key(
+                row,
+                group_by_store=group_by_store,
+                store_prefix="sale_item__sale__",
+                product_prefix="sale_item__",
+            )
+        ]
+        _set_identity(
+            target,
+            row,
+            group_by_store=group_by_store,
+            store_prefix="sale_item__sale__",
+            product_prefix="sale_item__",
+        )
         target["sold_cost"] = _money(row["sold_cost"])
 
     completed_rows = []
@@ -152,8 +195,6 @@ def build_product_profitability_rows(
 
         average_sale_price = _divide_money(row["revenue"], row["sold_quantity"])
         sold_cost = row["sold_cost"]
-        if sold_cost == ZERO_MONEY and row["sold_quantity"] > ZERO_QUANTITY:
-            sold_cost = _money(row["sold_quantity"] * average_purchase_price)
 
         profit = _money(row["revenue"] - sold_cost)
         margin_per_unit = ZERO_MONEY

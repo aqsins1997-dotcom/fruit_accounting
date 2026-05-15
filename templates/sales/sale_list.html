@@ -41,7 +41,7 @@
                                         {{ item.line_total|default:"0.00"|floatformat:2 }}
                                     </div>
                                 {% empty %}
-                                    -
+                                    <span class="badge badge--warning">Нет строк продажи</span>
                                 {% endfor %}
                             </td>
                             <td>{{ sale.total_amount|floatformat:2 }}</td>

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import DecimalField, Sum, Value
+from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -80,7 +81,15 @@ def recalculate_sale_costs_for_purchase_item(purchase_item):
     sale_items = (
         SaleItem.objects.select_for_update()
         .filter(id__in=sale_item_ids, sale__deleted_at__isnull=True)
-        .prefetch_related("batches__purchase_item")
+        .prefetch_related(
+            Prefetch(
+                "batches",
+                queryset=SaleItemBatch.objects.select_related("purchase_item").filter(
+                    purchase_item__purchase__deleted_at__isnull=True,
+                    sale_item__sale__deleted_at__isnull=True,
+                ),
+            )
+        )
     )
     for sale_item in sale_items:
         total_cost = sum(
