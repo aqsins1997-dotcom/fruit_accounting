@@ -1,11 +1,14 @@
 from decimal import Decimal
+from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Customer, Product, Store, Supplier
+from apps.credits.models import ClientDebtPayment
 from apps.credits.services import build_debtor_rows
 from apps.expenses.models import ExpenseCategory, StoreExpense
 from apps.inventory.models import Purchase, PurchaseItem, StoreStock, calculate_active_stock_quantity
@@ -471,3 +474,72 @@ class SalesNoAdminViewsTests(TestCase):
         recalculate_cash_registers(store=self.store)
 
         self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("375.00"))
+
+    def test_reconcile_cash_apply_restores_balance_to_formula(self):
+        category = ExpenseCategory.objects.create(name="Other")
+        customer = Customer.objects.create(name="Debt customer")
+
+        cash_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=cash_sale,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            sale_price_per_kg=Decimal("100.00"),
+        )
+        credit_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            customer=customer,
+        )
+        SaleItem.objects.create(
+            sale=credit_sale,
+            product=self.product,
+            quantity_kg=Decimal("3.000"),
+            sale_price_per_kg=Decimal("50.00"),
+        )
+        ClientDebtPayment.objects.create(
+            store=self.store,
+            client=customer,
+            amount=Decimal("50.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-04-20",
+        )
+
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-19")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("40.00"),
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-20",
+            amount=Decimal("40.00"),
+        )
+        StoreExpense.objects.create(
+            store=self.store,
+            category=category,
+            date="2026-04-20",
+            amount=Decimal("10.00"),
+        )
+        CashRegister.objects.filter(store=self.store).update(balance=Decimal("9999.00"))
+
+        dry_run_output = StringIO()
+        call_command("reconcile_cash", "--store", self.store.name, "--dry-run", stdout=dry_run_output)
+        self.assertIn("DRY RUN", dry_run_output.getvalue())
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("9999.00"))
+
+        apply_output = StringIO()
+        call_command("reconcile_cash", "--store", self.store.name, "--apply", stdout=apply_output)
+
+        self.assertIn("Applied cash correction", apply_output.getvalue())
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("200.00"))
