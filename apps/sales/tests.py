@@ -13,7 +13,7 @@ from apps.payables.models import SupplierPayment
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch
-from .services import recalculate_cash_registers
+from .services import build_cash_breakdown, recalculate_cash_registers
 
 
 class SalesNoAdminViewsTests(TestCase):
@@ -378,6 +378,39 @@ class SalesNoAdminViewsTests(TestCase):
         sale.refresh_from_db()
         self.assertEqual(register.balance, Decimal("0.00"))
         self.assertEqual(sale.credit.remaining_amount, Decimal("150.00"))
+
+    def test_cash_breakdown_excludes_credit_sales_from_current_cash(self):
+        customer = Customer.objects.create(name="Customer 1")
+        cash_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=cash_sale,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            sale_price_per_kg=Decimal("50.00"),
+        )
+        credit_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            customer=customer,
+        )
+        SaleItem.objects.create(
+            sale=credit_sale,
+            product=self.product,
+            quantity_kg=Decimal("3.000"),
+            sale_price_per_kg=Decimal("70.00"),
+        )
+
+        breakdown = build_cash_breakdown(self.store)
+
+        self.assertEqual(breakdown["cash_sales"], Decimal("100.00"))
+        self.assertEqual(breakdown["credit_sales"], Decimal("210.00"))
+        self.assertEqual(breakdown["formula_balance"], Decimal("100.00"))
+        self.assertEqual(breakdown["stored_balance"], Decimal("100.00"))
 
     def test_sale_store_cannot_change_after_items_are_saved(self):
         other_store = Store.objects.create(name="Other store")

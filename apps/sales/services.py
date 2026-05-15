@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import DecimalField, Sum, Value
+from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -24,7 +24,7 @@ def _sum_amount(queryset, field_name="amount"):
     )["total"] or ZERO
 
 
-def calculate_cash_balance(store):
+def build_cash_breakdown(store):
     from apps.credits.models import ClientDebtPayment, CreditPayment
     from apps.expenses.models import EmployeeAdvance, SalaryPayment, StoreExpense
     from apps.payables.models import SupplierPayment
@@ -37,7 +37,29 @@ def calculate_cash_balance(store):
         ),
         "total_amount",
     )
-    client_debt_payments = _sum_amount(ClientDebtPayment.objects.filter(store=store))
+
+    credit_sales = _sum_amount(
+        Sale.objects.filter(
+            store=store,
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            deleted_at__isnull=True,
+        ),
+        "total_amount",
+    )
+
+    client_debt_payment_queryset = ClientDebtPayment.objects.filter(store=store)
+    client_debt_payments = _sum_amount(client_debt_payment_queryset)
+    client_debt_payments_by_method = {
+        row["payment_method"]: {
+            "count": row["count"],
+            "total": _money(row["total"]),
+        }
+        for row in client_debt_payment_queryset.values("payment_method").annotate(
+            count=Count("id"),
+            total=Coalesce(Sum("amount"), Value(ZERO, output_field=MONEY_FIELD)),
+        )
+    }
+
     legacy_credit_payments = _sum_amount(
         CreditPayment.objects.filter(
             credit__store=store,
@@ -50,7 +72,7 @@ def calculate_cash_balance(store):
     store_expenses = _sum_amount(StoreExpense.objects.filter(store=store))
     salary_payments = _sum_amount(SalaryPayment.objects.filter(store=store))
 
-    return _money(
+    formula_balance = _money(
         cash_sales
         + client_debt_payments
         + legacy_credit_payments
@@ -59,6 +81,39 @@ def calculate_cash_balance(store):
         - store_expenses
         - salary_payments
     )
+    register = CashRegister.objects.filter(store=store).first()
+    stored_balance = _money(register.balance if register else ZERO)
+
+    return {
+        "store": store,
+        "stored_balance": stored_balance,
+        "formula_balance": formula_balance,
+        "difference": _money(stored_balance - formula_balance),
+        "cash_sales": _money(cash_sales),
+        "cash_sales_count": Sale.objects.filter(
+            store=store,
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+            deleted_at__isnull=True,
+        ).count(),
+        "credit_sales": _money(credit_sales),
+        "credit_sales_count": Sale.objects.filter(
+            store=store,
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            deleted_at__isnull=True,
+        ).count(),
+        "client_debt_payments": _money(client_debt_payments),
+        "client_debt_payments_count": client_debt_payment_queryset.count(),
+        "client_debt_payments_by_method": client_debt_payments_by_method,
+        "legacy_credit_payments": _money(legacy_credit_payments),
+        "supplier_payments": _money(supplier_payments),
+        "employee_advances": _money(employee_advances),
+        "store_expenses": _money(store_expenses),
+        "salary_payments": _money(salary_payments),
+    }
+
+
+def calculate_cash_balance(store):
+    return build_cash_breakdown(store)["formula_balance"]
 
 
 @transaction.atomic
