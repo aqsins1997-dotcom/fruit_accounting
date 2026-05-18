@@ -76,6 +76,89 @@ class SupplierBalancesViewTests(TestCase):
         )
         self.assertEqual(allocations, [(purchase_one.id, Decimal("200.00")), (purchase_two.id, Decimal("50.00"))])
 
+    def test_supplier_payment_auto_allocates_oldest_debts_and_stops_on_partial(self):
+        purchase_old = Purchase.objects.create(supplier=self.supplier, date="2026-04-09")
+        purchase_middle = Purchase.objects.create(supplier=self.supplier, date="2026-04-12")
+        purchase_new = Purchase.objects.create(supplier=self.supplier, date="2026-04-13")
+
+        PurchaseItem.objects.create(
+            purchase=purchase_old,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("48980.00"),
+        )
+        PurchaseItem.objects.create(
+            purchase=purchase_middle,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("131520.00"),
+        )
+        PurchaseItem.objects.create(
+            purchase=purchase_new,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("208600.00"),
+        )
+        CashRegister.objects.filter(store=self.store).update(balance=Decimal("500000.00"))
+
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            date="2026-04-14",
+            payment_method=SupplierPayment.PAYMENT_METHOD_TRANSFER,
+            amount=Decimal("150000.00"),
+        )
+
+        allocations = list(
+            SupplierPaymentAllocation.objects.filter(payment=payment)
+            .order_by("purchase__date", "purchase_id")
+            .values_list("purchase_id", "amount")
+        )
+        self.assertEqual(
+            allocations,
+            [
+                (purchase_old.id, Decimal("48980.00")),
+                (purchase_middle.id, Decimal("101020.00")),
+            ],
+        )
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["purchase_total"], Decimal("389100.00"))
+        self.assertEqual(group["paid_amount"], Decimal("150000.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("239100.00"))
+        first_row, second_row, third_row = group["rows"]
+        self.assertEqual(first_row["status"], "Оплачено")
+        self.assertEqual(first_row["remaining_amount"], Decimal("0.00"))
+        self.assertEqual(second_row["status"], "Частично оплачено")
+        self.assertEqual(second_row["remaining_amount"], Decimal("30500.00"))
+        self.assertEqual(third_row["status"], "Не оплачено")
+        self.assertEqual(third_row["remaining_amount"], Decimal("208600.00"))
+
+    def test_supplier_payment_cannot_exceed_remaining_debt(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("1.000"),
+            purchase_price_per_kg=Decimal("100.00"),
+        )
+
+        with self.assertRaises(ValidationError):
+            SupplierPayment.objects.create(
+                supplier=self.supplier,
+                store=self.store,
+                date="2026-04-11",
+                amount=Decimal("150.00"),
+            )
+
+        self.assertFalse(SupplierPayment.objects.exists())
+        self.assertFalse(SupplierPaymentAllocation.objects.exists())
+
     def test_supplier_payment_can_be_bound_to_purchase(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
         PurchaseItem.objects.create(
@@ -329,7 +412,7 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(str(response.context["form"].initial["supplier"]), str(self.supplier.id))
         self.assertEqual(str(response.context["form"].initial["store"]), str(self.store.id))
-        self.assertEqual(str(response.context["form"].initial["purchase"]), str(purchase.id))
+        self.assertNotIn("purchase", response.context["form"].fields)
 
     def test_supplier_balance_filter_by_supplier_and_status(self):
         unpaid_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")

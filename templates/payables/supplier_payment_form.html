@@ -2,7 +2,7 @@
 
 {% block title %}Оплата поставщику{% endblock %}
 {% block page_title %}Новая оплата поставщику{% endblock %}
-{% block page_subtitle %}Добавление оплаты без админки с возможностью привязать платеж к закупке{% endblock %}
+{% block page_subtitle %}Добавление оплаты без выбора закупки: программа сама распределит сумму по старым долгам поставщика{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
@@ -10,7 +10,7 @@
         <div class="stat-card">
             <div class="stat-card__label">Что делает форма</div>
             <div class="stat-card__value">Оплата поставщику</div>
-            <div class="stat-card__meta">Можно указать конкретную закупку или оставить оплату общей.</div>
+            <div class="stat-card__meta">Выберите поставщика и сумму, а закупки закроются автоматически.</div>
         </div>
         <div class="stat-card">
             <div class="stat-card__label">Как распределяется</div>
@@ -41,21 +41,18 @@
             </div>
 
             <div class="form-group">
-                <label for="{{ form.purchase.id_for_label }}">Закупка</label>
-                {{ form.purchase }}
-                {% if form.purchase.help_text %}
-                    <div class="page-subtitle" style="margin-top: 6px;">{{ form.purchase.help_text }}</div>
-                {% endif %}
-                {% if form.purchase.errors %}
-                    <div class="message error">{{ form.purchase.errors|join:", " }}</div>
-                {% endif %}
-            </div>
-
-            <div class="form-group">
                 <label for="{{ form.date.id_for_label }}">Дата</label>
                 {{ form.date }}
                 {% if form.date.errors %}
                     <div class="message error">{{ form.date.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="{{ form.payment_method.id_for_label }}">Способ оплаты</label>
+                {{ form.payment_method }}
+                {% if form.payment_method.errors %}
+                    <div class="message error">{{ form.payment_method.errors|join:", " }}</div>
                 {% endif %}
             </div>
 
@@ -98,7 +95,7 @@
                             <th>Дата</th>
                             <th>Поставщик</th>
                             <th>Магазин</th>
-                            <th>Закупка</th>
+                            <th>Способ</th>
                             <th>Сумма</th>
                         </tr>
                     </thead>
@@ -108,7 +105,7 @@
                             <td>{{ payment.date|date:"d.m.Y" }}</td>
                             <td>{{ payment.supplier.name }}</td>
                             <td>{{ payment.store.name }}</td>
-                            <td>{% if payment.purchase_id %}№{{ payment.purchase_id }}{% else %}-{% endif %}</td>
+                            <td>{{ payment.get_payment_method_display }}</td>
                             <td>{{ payment.amount|floatformat:2 }}</td>
                         </tr>
                         {% endfor %}

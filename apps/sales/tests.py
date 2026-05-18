@@ -51,6 +51,7 @@ class SalesNoAdminViewsTests(TestCase):
                 "customer": "",
                 "comment": "Продажа у витрины",
                 "product": self.product.id,
+                "purchase_item": self.purchase_item.id,
                 "quantity_kg": "5.000",
                 "sale_price_per_kg": "30.00",
             },
@@ -63,13 +64,35 @@ class SalesNoAdminViewsTests(TestCase):
         register = CashRegister.objects.get(store=self.store)
         self.assertEqual(register.balance, Decimal("150.00"))
 
-    def test_sale_is_allocated_to_purchase_batches_fifo(self):
+    def test_sale_create_requires_purchase_batch(self):
+        response = self.client.post(
+            reverse("sales:sale_create"),
+            {
+                "store": self.store.id,
+                "date": "2026-04-19",
+                "payment_type": "cash",
+                "customer": "",
+                "comment": "",
+                "product": self.product.id,
+                "purchase_item": "",
+                "quantity_kg": "5.000",
+                "sale_price_per_kg": "30.00",
+                "sale_total": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("purchase_item", response.context["item_form"].errors)
+        self.assertEqual(Sale.objects.count(), 0)
+        self.assertEqual(SaleItem.objects.count(), 0)
+
+    def test_sale_is_allocated_only_to_selected_purchase_batch(self):
         second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
         second_item = PurchaseItem.objects.create(
             purchase=second_purchase,
             store=self.store,
             product=self.product,
-            quantity_kg=Decimal("5.000"),
+            quantity_kg=Decimal("500.000"),
             purchase_price_per_kg=Decimal("20.00"),
         )
 
@@ -78,24 +101,73 @@ class SalesNoAdminViewsTests(TestCase):
             date="2026-04-21",
             payment_type=Sale.PAYMENT_TYPE_CASH,
         )
-        item = SaleItem.objects.create(
+        item = SaleItem(
             sale=sale,
             product=self.product,
             quantity_kg=Decimal("22.000"),
             sale_price_per_kg=Decimal("30.00"),
         )
+        item._selected_purchase_item = second_item
+        item.save()
 
         batches = list(SaleItemBatch.objects.order_by("id"))
-        self.assertEqual(len(batches), 2)
-        self.assertEqual(batches[0].purchase_item_id, self.purchase_item.id)
-        self.assertEqual(batches[0].quantity, Decimal("20.000"))
-        self.assertEqual(batches[1].purchase_item_id, second_item.id)
-        self.assertEqual(batches[1].quantity, Decimal("2.000"))
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0].purchase_item_id, second_item.id)
+        self.assertEqual(batches[0].quantity, Decimal("22.000"))
 
         item.refresh_from_db()
-        self.assertEqual(item.line_cost_total, Decimal("240.00"))
-        self.assertEqual(item.profit, Decimal("420.00"))
-        self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("3.000"))
+        self.assertEqual(item.line_cost_total, Decimal("440.00"))
+        self.assertEqual(item.profit, Decimal("220.00"))
+        profitability = build_purchase_item_profitability_map(
+            purchase_item_ids=[self.purchase_item.id, second_item.id]
+        )
+        self.assertEqual(profitability[self.purchase_item.id]["sold_quantity"], Decimal("0.000"))
+        self.assertEqual(profitability[self.purchase_item.id]["stock_quantity"], Decimal("20.000"))
+        self.assertEqual(profitability[second_item.id]["sold_quantity"], Decimal("22.000"))
+        self.assertEqual(profitability[second_item.id]["stock_quantity"], Decimal("478.000"))
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("498.000"))
+
+    def test_sale_form_sells_from_selected_purchase_not_older_batch(self):
+        second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-20")
+        second_item = PurchaseItem.objects.create(
+            purchase=second_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("350.00"),
+        )
+
+        response = self.client.post(
+            reverse("sales:sale_create"),
+            {
+                "store": self.store.id,
+                "date": "2026-04-21",
+                "payment_type": "cash",
+                "customer": "",
+                "comment": "",
+                "product": self.product.id,
+                "purchase_item": second_item.id,
+                "quantity_kg": "100.000",
+                "sale_price_per_kg": "500.00",
+                "sale_total": "",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sale_item = SaleItem.objects.get()
+        batch = SaleItemBatch.objects.get(sale_item=sale_item)
+        self.assertEqual(batch.purchase_item_id, second_item.id)
+        self.assertEqual(sale_item.line_cost_total, Decimal("35000.00"))
+        self.assertEqual(sale_item.profit, Decimal("15000.00"))
+
+        profitability = build_purchase_item_profitability_map(
+            purchase_item_ids=[self.purchase_item.id, second_item.id]
+        )
+        self.assertEqual(profitability[self.purchase_item.id]["sold_quantity"], Decimal("0.000"))
+        self.assertEqual(profitability[self.purchase_item.id]["stock_quantity"], Decimal("20.000"))
+        self.assertEqual(profitability[second_item.id]["sold_quantity"], Decimal("100.000"))
+        self.assertEqual(profitability[second_item.id]["stock_quantity"], Decimal("400.000"))
 
     def test_sale_list_shows_items_with_weight_price_and_total(self):
         sale = Sale.objects.create(
@@ -282,6 +354,7 @@ class SalesNoAdminViewsTests(TestCase):
                 "customer": "",
                 "comment": "Total based sale",
                 "product": self.product.id,
+                "purchase_item": self.purchase_item.id,
                 "quantity_kg": "4.000",
                 "sale_price_per_kg": "",
                 "sale_total": "1000.00",
@@ -315,6 +388,7 @@ class SalesNoAdminViewsTests(TestCase):
                 "customer": "",
                 "comment": "",
                 "product": self.product.id,
+                "purchase_item": self.purchase_item.id,
                 "quantity_kg": "3.000",
                 "sale_price_per_kg": "",
                 "sale_total": "1000.00",
@@ -339,6 +413,7 @@ class SalesNoAdminViewsTests(TestCase):
                 "customer": "",
                 "comment": "",
                 "product": self.product.id,
+                "purchase_item": self.purchase_item.id,
                 "quantity_kg": "25.000",
                 "sale_price_per_kg": "30.00",
                 "sale_total": "",
@@ -349,7 +424,7 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertFormError(
             response.context["item_form"],
             "quantity_kg",
-            "Недостаточно остатка. Доступно: 20.000 кг.",
+            "Недостаточно остатка в выбранной закупке. Доступно: 20.000 кг.",
         )
         self.assertEqual(Sale.objects.count(), 0)
         self.assertEqual(SaleItem.objects.count(), 0)

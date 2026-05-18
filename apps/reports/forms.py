@@ -3,6 +3,7 @@ from django import forms
 from apps.core.models import Customer, Product, Store, Supplier
 from apps.credits.models import CreditPayment
 from apps.inventory.models import Purchase, PurchaseItem
+from apps.sales.forms import PurchaseItemChoiceField, available_purchase_item_queryset
 from apps.sales.models import Sale, SaleItem
 
 
@@ -58,10 +59,34 @@ class MobileSaleForm(forms.ModelForm):
 
 
 class MobileSaleItemForm(forms.ModelForm):
+    purchase_item = PurchaseItemChoiceField(
+        label="Закупка / партия",
+        queryset=PurchaseItem.objects.none(),
+        empty_label="Выберите закупку/партию",
+        required=True,
+    )
+
     class Meta:
         model = SaleItem
-        fields = ("product", "quantity_kg", "sale_price_per_kg")
+        fields = ("product", "purchase_item", "quantity_kg", "sale_price_per_kg")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, store_id=None, product_id=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.store_id = store_id
         self.fields["product"].queryset = Product.objects.order_by("name")
+        purchase_item_ids = [
+            item.id for item in available_purchase_item_queryset(store_id=store_id, product_id=product_id)
+        ]
+        self.fields["purchase_item"].queryset = (
+            PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product")
+            .filter(id__in=purchase_item_ids)
+            .order_by("purchase__date", "id")
+        )
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance._selected_purchase_item = self.cleaned_data.get("purchase_item")
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance

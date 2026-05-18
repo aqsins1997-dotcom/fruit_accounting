@@ -126,6 +126,10 @@
                 {{ item_form.product }}
                 {{ item_form.product.errors }}
 
+                <label for="{{ item_form.purchase_item.id_for_label }}">Закупка / партия</label>
+                {{ item_form.purchase_item }}
+                {{ item_form.purchase_item.errors }}
+
                 <label for="{{ item_form.quantity_kg.id_for_label }}">Количество</label>
                 {{ item_form.quantity_kg }}
                 {{ item_form.quantity_kg.errors }}

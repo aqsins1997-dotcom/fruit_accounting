@@ -113,7 +113,59 @@ def rebuild_supplier_payment_allocations(*, supplier_id, store_id):
         SupplierPaymentAllocation.objects.bulk_create(allocations_to_create)
 
 
+def get_supplier_remaining_debt(*, supplier_id, store_id, exclude_payment_id=None):
+    if not supplier_id or not store_id:
+        return Decimal("0.00")
+
+    money_field = DecimalField(max_digits=14, decimal_places=2)
+    line_total = ExpressionWrapper(
+        F("quantity_kg") * F("purchase_price_per_kg"),
+        output_field=money_field,
+    )
+    purchase_total = (
+        PurchaseItem.objects.filter(
+            purchase__supplier_id=supplier_id,
+            purchase__deleted_at__isnull=True,
+            store_id=store_id,
+        )
+        .annotate(line_total=line_total)
+        .aggregate(
+            total=Coalesce(
+                Sum("line_total"),
+                Value(Decimal("0.00"), output_field=money_field),
+            )
+        )["total"]
+        or Decimal("0.00")
+    )
+
+    payments = SupplierPayment.objects.filter(supplier_id=supplier_id, store_id=store_id)
+    if exclude_payment_id:
+        payments = payments.exclude(pk=exclude_payment_id)
+
+    paid_total = payments.aggregate(
+        total=Coalesce(
+            Sum("amount"),
+            Value(Decimal("0.00"), output_field=money_field),
+        )
+    )["total"] or Decimal("0.00")
+
+    remaining = purchase_total - paid_total
+    if remaining < Decimal("0.00"):
+        return Decimal("0.00")
+    return remaining.quantize(Decimal("0.01"))
+
+
 class SupplierPayment(TimeStampedModel):
+    PAYMENT_METHOD_CASH = "cash"
+    PAYMENT_METHOD_CARD = "card"
+    PAYMENT_METHOD_TRANSFER = "transfer"
+
+    PAYMENT_METHOD_CHOICES = (
+        (PAYMENT_METHOD_CASH, "Наличные"),
+        (PAYMENT_METHOD_CARD, "Карта"),
+        (PAYMENT_METHOD_TRANSFER, "Перевод"),
+    )
+
     supplier = models.ForeignKey(
         Supplier,
         on_delete=models.PROTECT,
@@ -140,6 +192,12 @@ class SupplierPayment(TimeStampedModel):
         decimal_places=2,
         verbose_name="Сумма оплаты",
     )
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        default=PAYMENT_METHOD_CASH,
+        verbose_name="Способ оплаты",
+    )
     comment = models.TextField(
         blank=True,
         verbose_name="Комментарий",
@@ -161,6 +219,21 @@ class SupplierPayment(TimeStampedModel):
     def clean(self):
         if self.amount is None or self.amount <= Decimal("0.00"):
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
+
+        remaining_debt = get_supplier_remaining_debt(
+            supplier_id=self.supplier_id,
+            store_id=self.store_id,
+            exclude_payment_id=self.pk,
+        )
+        if self.amount and self.amount > remaining_debt:
+            raise ValidationError(
+                {
+                    "amount": (
+                        "Сумма оплаты не может быть больше текущего долга поставщика. "
+                        f"Текущий долг: {remaining_debt}."
+                    )
+                }
+            )
 
         if self.purchase_id:
             errors = {}

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
@@ -26,6 +27,18 @@ from .forms import (
     MobileSaleForm,
     MobileSaleItemForm,
 )
+
+
+def _attach_validation_error(form, exc):
+    if hasattr(exc, "message_dict"):
+        for field_name, messages_list in exc.message_dict.items():
+            target_field = field_name if field_name in form.fields else None
+            for message in messages_list:
+                form.add_error(target_field, message)
+        return
+
+    for message in exc.messages:
+        form.add_error(None, message)
 
 
 def _product_profitability_filters(request):
@@ -585,17 +598,24 @@ def mobile_credit_payment_add(request, credit_id):
 def mobile_sale_add(request):
     if request.method == "POST":
         sale_form = MobileSaleForm(request.POST)
-        item_form = MobileSaleItemForm(request.POST)
+        item_form = MobileSaleItemForm(
+            request.POST,
+            store_id=request.POST.get("store"),
+            product_id=request.POST.get("product"),
+        )
 
         if sale_form.is_valid() and item_form.is_valid():
-            with transaction.atomic():
-                sale = sale_form.save()
-                item = item_form.save(commit=False)
-                item.sale = sale
-                item.save()
-
-            messages.success(request, "Продажа успешно добавлена.")
-            return redirect("reports:mobile_sale_add")
+            try:
+                with transaction.atomic():
+                    sale = sale_form.save()
+                    item = item_form.save(commit=False)
+                    item.sale = sale
+                    item.save()
+            except ValidationError as exc:
+                _attach_validation_error(item_form, exc)
+            else:
+                messages.success(request, "Продажа успешно добавлена.")
+                return redirect("reports:mobile_sale_add")
     else:
         sale_form = MobileSaleForm(initial={"date": timezone.now().date()})
         item_form = MobileSaleItemForm()

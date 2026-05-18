@@ -68,12 +68,22 @@ class InventoryNoAdminViewsTests(TestCase):
             date="2026-05-09",
             payment_type=Sale.PAYMENT_TYPE_CASH,
         )
-        SaleItem.objects.create(
+        first_sale_item = SaleItem(
             sale=sale,
             product=self.product,
-            quantity_kg=Decimal("15.000"),
+            quantity_kg=Decimal("10.000"),
             sale_price_per_kg=Decimal("100.00"),
         )
+        first_sale_item._selected_purchase_item = first_item
+        first_sale_item.save()
+        second_sale_item = SaleItem(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("100.00"),
+        )
+        second_sale_item._selected_purchase_item = second_item
+        second_sale_item.save()
 
         profitability = build_purchase_item_profitability_map(
             purchase_item_ids=[first_item.id, second_item.id]

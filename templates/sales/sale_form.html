@@ -35,8 +35,14 @@
     </section>
 </section>
 
+{{ purchase_item_options|json_script:"purchase-item-options" }}
 <script>
     (function () {
+        const storeInput = document.getElementById('{{ sale_form.store.id_for_label }}');
+        const productInput = document.getElementById('{{ item_form.product.id_for_label }}');
+        const purchaseInput = document.getElementById('{{ item_form.purchase_item.id_for_label }}');
+        const purchaseItemsData = JSON.parse(document.getElementById('purchase-item-options').textContent);
+        const selectedPurchaseItemId = '{{ selected_purchase_item_id|default:"" }}';
         const quantityInput = document.getElementById('{{ item_form.quantity_kg.id_for_label }}');
         const priceInput = document.getElementById('{{ item_form.sale_price_per_kg.id_for_label }}');
         const totalInput = document.getElementById('{{ item_form.sale_total.id_for_label }}');
@@ -56,6 +62,37 @@
                 return;
             }
             input.value = value.toFixed(2);
+        }
+
+        function rebuildPurchaseItems() {
+            if (!storeInput || !productInput || !purchaseInput) {
+                return;
+            }
+
+            const currentValue = purchaseInput.value || selectedPurchaseItemId;
+            const storeId = storeInput.value;
+            const productId = productInput.value;
+
+            purchaseInput.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Выберите закупку/партию';
+            purchaseInput.appendChild(placeholder);
+
+            purchaseItemsData
+                .filter(function (item) {
+                    return String(item.store_id) === String(storeId) && String(item.product_id) === String(productId);
+                })
+                .forEach(function (item) {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.label;
+                    option.dataset.available = item.available;
+                    if (String(item.id) === String(currentValue)) {
+                        option.selected = true;
+                    }
+                    purchaseInput.appendChild(option);
+                });
         }
 
         function syncSaleAmounts(source) {
@@ -110,6 +147,13 @@
                 syncSaleAmounts('total');
             });
         }
+        if (storeInput) {
+            storeInput.addEventListener('change', rebuildPurchaseItems);
+        }
+        if (productInput) {
+            productInput.addEventListener('change', rebuildPurchaseItems);
+        }
+        rebuildPurchaseItems();
     })();
 </script>
 {% endblock %}

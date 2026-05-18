@@ -45,7 +45,6 @@ def _build_payment_link(row):
     query = {
         "supplier": row["supplier_id"],
         "store": row["store_id"],
-        "purchase": row["purchase_id"],
     }
     return f"/reports/suppliers/payments/add/?{urlencode(query)}"
 
@@ -78,8 +77,6 @@ def supplier_payment_create(request):
             initial["supplier"] = supplier_id
         if store_id:
             initial["store"] = store_id
-        if purchase_id:
-            initial["purchase"] = purchase_id
         form = SupplierPaymentCreateForm(initial=initial, **form_kwargs)
 
     recent_payments = SupplierPayment.objects.select_related("supplier", "store", "purchase")[:10]

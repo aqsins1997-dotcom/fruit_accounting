@@ -681,66 +681,114 @@ def _validate_available_stock(available_quantity, requested_quantity):
         )
 
 
-def _purchase_item_allocated_quantity(purchase_item):
-    return SaleItemBatch.objects.filter(
+def purchase_item_allocated_quantity(purchase_item, *, exclude_sale_item_id=None):
+    allocations = SaleItemBatch.objects.filter(
         purchase_item=purchase_item,
         purchase_item__purchase__deleted_at__isnull=True,
         sale_item__sale__deleted_at__isnull=True,
-    ).aggregate(
-        total=models.Sum("quantity")
-    )["total"] or Decimal("0.000")
+    )
+    if exclude_sale_item_id:
+        allocations = allocations.exclude(sale_item_id=exclude_sale_item_id)
+    return allocations.aggregate(total=models.Sum("quantity"))["total"] or Decimal("0.000")
+
+
+def purchase_item_available_quantity(purchase_item, *, exclude_sale_item_id=None):
+    quantity = purchase_item.quantity_kg - purchase_item_allocated_quantity(
+        purchase_item,
+        exclude_sale_item_id=exclude_sale_item_id,
+    )
+    if quantity < Decimal("0.000"):
+        return Decimal("0.000")
+    return quantity.quantize(Decimal("0.001"))
+
+
+def _purchase_item_allocated_quantity(purchase_item):
+    return purchase_item_allocated_quantity(purchase_item)
+
+
+def _selected_purchase_item_for_sale_item(sale_item, *, sale):
+    selected_purchase_item = getattr(sale_item, "_selected_purchase_item", None)
+    selected_purchase_item_id = getattr(sale_item, "_selected_purchase_item_id", None)
+
+    if selected_purchase_item is None and selected_purchase_item_id:
+        selected_purchase_item = (
+            PurchaseItem.objects.select_for_update()
+            .select_related("purchase", "purchase__supplier")
+            .get(pk=selected_purchase_item_id)
+        )
+
+    if selected_purchase_item is None and sale_item.pk:
+        existing_batches = list(
+            SaleItemBatch.objects.select_related("purchase_item", "purchase_item__purchase")
+            .filter(sale_item=sale_item)
+            .order_by("id")[:2]
+        )
+        if len(existing_batches) == 1:
+            selected_purchase_item = existing_batches[0].purchase_item
+
+    if selected_purchase_item is None:
+        candidates = []
+        purchase_items = (
+            PurchaseItem.objects.select_for_update()
+            .select_related("purchase", "purchase__supplier")
+            .filter(
+                store_id=sale.store_id,
+                product_id=sale_item.product_id,
+                purchase__deleted_at__isnull=True,
+            )
+            .order_by("purchase__date", "id")
+        )
+        for purchase_item in purchase_items:
+            if purchase_item_available_quantity(
+                purchase_item,
+                exclude_sale_item_id=sale_item.pk,
+            ) >= sale_item.quantity_kg:
+                candidates.append(purchase_item)
+                if len(candidates) > 1:
+                    break
+
+        if len(candidates) == 1:
+            selected_purchase_item = candidates[0]
+
+    if selected_purchase_item is None:
+        raise ValidationError({"purchase_item": "Выберите закупку/партию, с которой списывается товар."})
+
+    return (
+        PurchaseItem.objects.select_for_update()
+        .select_related("purchase", "purchase__supplier")
+        .get(pk=selected_purchase_item.pk)
+    )
 
 
 def _replace_sale_item_batches(sale_item, *, sale):
-    SaleItemBatch.objects.filter(sale_item=sale_item).delete()
+    purchase_item = _selected_purchase_item_for_sale_item(sale_item, sale=sale)
 
-    remaining_quantity = sale_item.quantity_kg
-    remaining_amount = sale_item.line_total
-    total_cost = Decimal("0.00")
+    if purchase_item.purchase.deleted_at:
+        raise ValidationError({"purchase_item": "Нельзя списывать товар с удаленной закупки."})
+    if purchase_item.store_id != sale.store_id:
+        raise ValidationError({"purchase_item": "Выбранная закупка относится к другому магазину."})
+    if purchase_item.product_id != sale_item.product_id:
+        raise ValidationError({"purchase_item": "Выбранная закупка относится к другому товару."})
 
-    purchase_items = (
-        PurchaseItem.objects.select_for_update()
-        .filter(
-            store_id=sale.store_id,
-            product_id=sale_item.product_id,
-            purchase__deleted_at__isnull=True,
+    available_quantity = purchase_item_available_quantity(
+        purchase_item,
+        exclude_sale_item_id=sale_item.pk,
+    )
+    if sale_item.quantity_kg > available_quantity:
+        raise ValidationError(
+            {"quantity_kg": f"Недостаточно остатка в выбранной закупке. Доступно: {available_quantity} кг."}
         )
-        .select_related("purchase")
-        .order_by("purchase__date", "id")
+
+    SaleItemBatch.objects.filter(sale_item=sale_item).delete()
+    SaleItemBatch.objects.create(
+        sale_item=sale_item,
+        purchase_item=purchase_item,
+        quantity=sale_item.quantity_kg,
+        sale_price=sale_item.sale_price_per_kg,
+        total_amount=sale_item.line_total,
     )
 
-    for purchase_item in purchase_items:
-        if remaining_quantity <= Decimal("0.000"):
-            break
-
-        available_quantity = purchase_item.quantity_kg - _purchase_item_allocated_quantity(purchase_item)
-        if available_quantity <= Decimal("0.000"):
-            continue
-
-        batch_quantity = min(available_quantity, remaining_quantity)
-        if batch_quantity == remaining_quantity:
-            batch_amount = remaining_amount
-        else:
-            batch_amount = _money(sale_item.line_total * batch_quantity / sale_item.quantity_kg)
-
-        SaleItemBatch.objects.create(
-            sale_item=sale_item,
-            purchase_item=purchase_item,
-            quantity=batch_quantity,
-            sale_price=sale_item.sale_price_per_kg,
-            total_amount=batch_amount,
-        )
-
-        total_cost += batch_quantity * purchase_item.purchase_price_per_kg
-        remaining_quantity -= batch_quantity
-        remaining_amount -= batch_amount
-
-    if remaining_quantity > Decimal("0.000"):
-        raise ValidationError(
-            {"quantity_kg": f"Недостаточно остатка по партиям. Не распределено: {remaining_quantity} кг."}
-        )
-
-    return total_cost
+    return sale_item.quantity_kg * purchase_item.purchase_price_per_kg
 
 
 def _apply_batch_costs(sale_item, total_cost):

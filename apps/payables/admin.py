@@ -19,6 +19,7 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
         "supplier",
         "purchase",
         "date",
+        "payment_method",
         "amount",
         "created_at",
     )
@@ -26,6 +27,7 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
         "store",
         "supplier",
         "purchase",
+        "payment_method",
         "date",
         "created_at",
     )

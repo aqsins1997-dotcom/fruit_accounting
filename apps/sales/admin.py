@@ -3,13 +3,45 @@ from django.contrib import admin
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 
+from apps.inventory.models import PurchaseItem
+
+from .forms import PurchaseItemChoiceField, available_purchase_item_queryset
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch
 
 
 class SaleItemInlineForm(forms.ModelForm):
+    purchase_item = PurchaseItemChoiceField(
+        label="Закупка / партия",
+        queryset=PurchaseItem.objects.none(),
+        required=False,
+    )
+
     class Meta:
         model = SaleItem
         fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        purchase_items = available_purchase_item_queryset()
+        if self.instance and self.instance.pk:
+            batch = self.instance.batches.select_related("purchase_item").first()
+            if batch and batch.purchase_item not in purchase_items:
+                purchase_items.append(batch.purchase_item)
+            if batch:
+                self.initial["purchase_item"] = batch.purchase_item_id
+        self.fields["purchase_item"].queryset = (
+            PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product")
+            .filter(id__in=[item.id for item in purchase_items])
+            .order_by("purchase__date", "id")
+        )
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance._selected_purchase_item = self.cleaned_data.get("purchase_item")
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
 
 
 class SaleItemInline(admin.TabularInline):
@@ -19,6 +51,7 @@ class SaleItemInline(admin.TabularInline):
     min_num = 1
     fields = (
         "product",
+        "purchase_item",
         "quantity_kg",
         "sale_price_per_kg",
         "cost_price_per_kg",
@@ -144,6 +177,7 @@ class SaleAdmin(admin.ModelAdmin):
 
 @admin.register(SaleItem)
 class SaleItemAdmin(admin.ModelAdmin):
+    form = SaleItemInlineForm
     list_display = (
         "id",
         "sale",
