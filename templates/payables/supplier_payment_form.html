@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}Оплата поставщику{% endblock %}
-{% block page_title %}Новая оплата поставщику{% endblock %}
-{% block page_subtitle %}Добавление оплаты без выбора закупки: программа сама распределит сумму по старым долгам поставщика{% endblock %}
+{% block title %}{% if is_update %}Изменить оплату поставщику{% else %}Оплата поставщику{% endif %}{% endblock %}
+{% block page_title %}{% if is_update %}Изменить оплату поставщику{% else %}Новая оплата поставщику{% endif %}{% endblock %}
+{% block page_subtitle %}{% if is_update %}Сумма будет заново распределена по старым долгам поставщика{% else %}Добавление оплаты без выбора закупки: программа сама распределит сумму по старым долгам поставщика{% endif %}{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
@@ -24,21 +24,35 @@
         <form method="post" class="form-grid">
             {% csrf_token %}
 
-            <div class="form-group">
-                <label for="{{ form.supplier.id_for_label }}">Поставщик</label>
-                {{ form.supplier }}
-                {% if form.supplier.errors %}
-                    <div class="message error">{{ form.supplier.errors|join:", " }}</div>
-                {% endif %}
-            </div>
+            {% if form.supplier %}
+                <div class="form-group">
+                    <label for="{{ form.supplier.id_for_label }}">Поставщик</label>
+                    {{ form.supplier }}
+                    {% if form.supplier.errors %}
+                        <div class="message error">{{ form.supplier.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% else %}
+                <div class="form-group">
+                    <label>Поставщик</label>
+                    <div class="form-control">{{ payment.supplier.name }}</div>
+                </div>
+            {% endif %}
 
-            <div class="form-group">
-                <label for="{{ form.store.id_for_label }}">Магазин</label>
-                {{ form.store }}
-                {% if form.store.errors %}
-                    <div class="message error">{{ form.store.errors|join:", " }}</div>
-                {% endif %}
-            </div>
+            {% if form.store %}
+                <div class="form-group">
+                    <label for="{{ form.store.id_for_label }}">Магазин</label>
+                    {{ form.store }}
+                    {% if form.store.errors %}
+                        <div class="message error">{{ form.store.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% else %}
+                <div class="form-group">
+                    <label>Магазин</label>
+                    <div class="form-control">{{ payment.store.name }}</div>
+                </div>
+            {% endif %}
 
             <div class="form-group">
                 <label for="{{ form.date.id_for_label }}">Дата</label>
@@ -79,7 +93,7 @@
             {% endif %}
 
             <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button type="submit" class="btn btn--primary">Сохранить оплату</button>
+                <button type="submit" class="btn btn--primary">{% if is_update %}Сохранить изменения{% else %}Сохранить оплату{% endif %}</button>
                 <a href="{% url 'payables:supplier_balances' %}" class="btn">Назад к долгам поставщиков</a>
             </div>
         </form>

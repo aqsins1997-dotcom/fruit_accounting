@@ -394,11 +394,16 @@ def debtor_detail(request, customer_id):
         credit__sale__deleted_at__isnull=True,
         client_debt_payment__isnull=True,
     )
+    active_payment_allocations = CreditPayment.objects.filter(
+        credit__customer_id=customer_id,
+        credit__sale__deleted_at__isnull=True,
+        client_debt_payment__status=ClientDebtPayment.STATUS_ACTIVE,
+    )
 
     total_taken = credits.aggregate(
         total=Coalesce(Sum("original_amount"), Decimal("0.00"))
     )["total"]
-    total_paid = payments.aggregate(
+    total_paid = active_payment_allocations.aggregate(
         total=Coalesce(Sum("amount"), Decimal("0.00"))
     )["total"]
     total_paid += legacy_payments.aggregate(
@@ -455,11 +460,16 @@ def debtor_detail_print(request, customer_id):
         .select_related("credit", "credit__store")
         .order_by("-date", "-id")
     )
+    active_payment_allocations = CreditPayment.objects.filter(
+        credit__customer_id=customer_id,
+        credit__sale__deleted_at__isnull=True,
+        client_debt_payment__status=ClientDebtPayment.STATUS_ACTIVE,
+    )
 
     total_taken = credits.aggregate(
         total=Coalesce(Sum("original_amount"), Decimal("0.00"))
     )["total"]
-    total_paid = payments.aggregate(
+    total_paid = active_payment_allocations.aggregate(
         total=Coalesce(Sum("amount"), Decimal("0.00"))
     )["total"]
     total_paid += legacy_payments.aggregate(

@@ -21,6 +21,7 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
         "date",
         "payment_method",
         "amount",
+        "status",
         "created_at",
     )
     list_filter = (
@@ -28,6 +29,7 @@ class SupplierPaymentAdmin(admin.ModelAdmin):
         "supplier",
         "purchase",
         "payment_method",
+        "status",
         "date",
         "created_at",
     )

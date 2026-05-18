@@ -11,7 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from apps.core.models import Store
 
-from .forms import ClientDebtPaymentCreateForm
+from .forms import ClientDebtPaymentCreateForm, ClientDebtPaymentUpdateForm
 from .models import ClientDebtPayment, Credit
 from .services import build_debtor_rows, get_client_debt
 
@@ -89,6 +89,18 @@ def _selected_payment_context(request, form):
     }
 
 
+def _payment_context_from_instance(payment):
+    return {
+        "selected_store": payment.store,
+        "selected_client": payment.client,
+        "current_debt": get_client_debt(
+            store=payment.store,
+            client=payment.client,
+            exclude_payment_id=payment.pk,
+        ),
+    }
+
+
 @login_required
 def credit_payment_create(request, credit_id):
     credit = get_object_or_404(
@@ -132,9 +144,54 @@ def client_debt_payment_create(request):
 
 
 @login_required
+def client_debt_payment_update(request, pk):
+    payment = get_object_or_404(
+        ClientDebtPayment.objects.select_related("store", "client", "employee"),
+        pk=pk,
+    )
+    if payment.status == ClientDebtPayment.STATUS_CANCELLED:
+        messages.error(request, "Отменённую оплату нельзя изменить.")
+        return redirect("credits:credit_payment_list")
+
+    if request.method == "POST":
+        form = ClientDebtPaymentUpdateForm(request.POST, instance=payment)
+        if form.is_valid():
+            try:
+                form.save()
+            except ValidationError as exc:
+                _attach_validation_error(form, exc)
+            else:
+                messages.success(request, "Оплата клиента успешно обновлена.")
+                return redirect("credits:credit_payment_list")
+    else:
+        form = ClientDebtPaymentUpdateForm(instance=payment)
+
+    context = {
+        "form": form,
+        "is_update": True,
+        "payment": payment,
+        **_payment_context_from_instance(payment),
+    }
+    return render(request, "credits/payment_form.html", context)
+
+
+@login_required
+@require_POST
+def client_debt_payment_cancel(request, pk):
+    payment = get_object_or_404(ClientDebtPayment, pk=pk)
+    if payment.status == ClientDebtPayment.STATUS_CANCELLED:
+        messages.info(request, "Эта оплата уже отменена.")
+    else:
+        payment.cancel(reason=request.POST.get("cancel_reason", ""))
+        messages.success(request, "Оплата клиента отменена. Долг и касса пересчитаны.")
+    return redirect("credits:credit_payment_list")
+
+
+@login_required
 def credit_payment_list(request):
     payments = (
         ClientDebtPayment.objects.select_related("store", "client", "employee")
+        .prefetch_related("allocations__credit__sale")
         .order_by("-paid_at", "-id")
     )
     return render(request, "credits/payment_list.html", {"payments": payments})
@@ -206,6 +263,9 @@ def _payment_to_dict(payment):
         "payment_method_display": payment.get_payment_method_display(),
         "comment": payment.comment,
         "employee": payment.employee.username if payment.employee else "",
+        "status": payment.status,
+        "status_display": payment.get_status_display(),
+        "cancelled_at": payment.cancelled_at.isoformat() if payment.cancelled_at else None,
     }
 
 

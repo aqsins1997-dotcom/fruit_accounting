@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}Новая оплата клиента{% endblock %}
-{% block page_title %}Новая оплата клиента{% endblock %}
-{% block page_subtitle %}Погашение клиентского долга с автоматическим пополнением кассы{% endblock %}
+{% block title %}{% if is_update %}Изменить оплату клиента{% else %}Новая оплата клиента{% endif %}{% endblock %}
+{% block page_title %}{% if is_update %}Изменить оплату клиента{% else %}Новая оплата клиента{% endif %}{% endblock %}
+{% block page_subtitle %}{% if is_update %}Сумма будет заново распределена по старым долгам клиента{% else %}Погашение клиентского долга с автоматическим пополнением кассы{% endif %}{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
@@ -55,21 +55,25 @@
         <form method="post" class="form-grid">
             {% csrf_token %}
 
-            <div class="form-group">
-                <label for="{{ form.store.id_for_label }}">Магазин</label>
-                {{ form.store }}
-                {% if form.store.errors %}
-                    <div class="message error">{{ form.store.errors|join:", " }}</div>
-                {% endif %}
-            </div>
+            {% if form.store %}
+                <div class="form-group">
+                    <label for="{{ form.store.id_for_label }}">Магазин</label>
+                    {{ form.store }}
+                    {% if form.store.errors %}
+                        <div class="message error">{{ form.store.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endif %}
 
-            <div class="form-group">
-                <label for="{{ form.client.id_for_label }}">Клиент</label>
-                {{ form.client }}
-                {% if form.client.errors %}
-                    <div class="message error">{{ form.client.errors|join:", " }}</div>
-                {% endif %}
-            </div>
+            {% if form.client %}
+                <div class="form-group">
+                    <label for="{{ form.client.id_for_label }}">Клиент</label>
+                    {{ form.client }}
+                    {% if form.client.errors %}
+                        <div class="message error">{{ form.client.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+            {% endif %}
 
             <div class="form-group">
                 <label for="{{ form.amount.id_for_label }}">Сумма оплаты</label>
@@ -110,7 +114,7 @@
             {% endif %}
 
             <div class="form-group form-group--full" style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button type="submit" class="btn btn--primary">Сохранить оплату</button>
+                <button type="submit" class="btn btn--primary">{% if is_update %}Сохранить изменения{% else %}Сохранить оплату{% endif %}</button>
                 <a href="{% url 'reports:debtors_report' %}" class="btn">К должникам</a>
                 <a href="{% url 'credits:credit_payment_list' %}" class="btn">История оплат</a>
             </div>

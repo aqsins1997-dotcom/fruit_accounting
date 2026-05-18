@@ -156,6 +156,7 @@ class ClientDebtPaymentAdmin(admin.ModelAdmin):
         "store",
         "amount",
         "payment_method",
+        "status",
         "paid_at",
         "employee",
         "created_at",
@@ -163,6 +164,7 @@ class ClientDebtPaymentAdmin(admin.ModelAdmin):
     list_filter = (
         "paid_at",
         "payment_method",
+        "status",
         "store",
         "created_at",
     )
@@ -173,4 +175,4 @@ class ClientDebtPaymentAdmin(admin.ModelAdmin):
         "employee__username",
     )
     autocomplete_fields = ("store", "client", "employee")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("cancelled_at", "created_at", "updated_at")

@@ -30,3 +30,13 @@ class ClientDebtPaymentCreateForm(forms.ModelForm):
         self.fields["client"].queryset = Customer.objects.order_by("name")
         self.fields["amount"].label = "Сумма оплаты"
         self.fields["paid_at"].label = "Дата оплаты"
+
+
+class ClientDebtPaymentUpdateForm(forms.ModelForm):
+    class Meta:
+        model = ClientDebtPayment
+        fields = ("amount", "payment_method", "comment", "paid_at")
+        widgets = {
+            "paid_at": forms.DateInput(attrs={"type": "date"}),
+            "comment": forms.Textarea(attrs={"rows": 3}),
+        }

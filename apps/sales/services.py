@@ -47,7 +47,10 @@ def build_cash_breakdown(store):
         "total_amount",
     )
 
-    client_debt_payment_queryset = ClientDebtPayment.objects.filter(store=store)
+    client_debt_payment_queryset = ClientDebtPayment.objects.filter(
+        store=store,
+        status=ClientDebtPayment.STATUS_ACTIVE,
+    )
     client_debt_payments = _sum_amount(client_debt_payment_queryset)
     client_debt_payments_by_method = {
         row["payment_method"]: {
@@ -67,7 +70,12 @@ def build_cash_breakdown(store):
             client_debt_payment__isnull=True,
         )
     )
-    supplier_payments = _sum_amount(SupplierPayment.objects.filter(store=store))
+    supplier_payments = _sum_amount(
+        SupplierPayment.objects.filter(
+            store=store,
+            status=SupplierPayment.STATUS_ACTIVE,
+        )
+    )
     employee_advances = _sum_amount(EmployeeAdvance.objects.filter(store=store))
     store_expenses = _sum_amount(StoreExpense.objects.filter(store=store, deleted_at__isnull=True))
     salary_payments = _sum_amount(SalaryPayment.objects.filter(store=store))

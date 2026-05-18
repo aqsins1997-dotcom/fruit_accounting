@@ -28,6 +28,16 @@ class SupplierPaymentCreateForm(forms.ModelForm):
         }
 
 
+class SupplierPaymentUpdateForm(forms.ModelForm):
+    class Meta:
+        model = SupplierPayment
+        fields = ("date", "payment_method", "amount", "comment")
+        widgets = {
+            "date": forms.DateInput(attrs={"type": "date"}),
+            "comment": forms.Textarea(attrs={"rows": 3}),
+        }
+
+
 class SupplierBalanceFilterForm(forms.Form):
     STATUS_ALL = "all"
     STATUS_UNPAID = "unpaid"

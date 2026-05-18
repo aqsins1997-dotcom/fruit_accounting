@@ -129,6 +129,94 @@ class CreditNoAdminViewsTests(TestCase):
         self.assertContains(response, "Активных долгов нет.")
         self.assertContains(self.client.get(reverse("credits:credit_payment_list")), "Полная оплата")
 
+    def test_client_payment_cancel_restores_debt_and_cash_without_deleting_history(self):
+        payment = ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("60.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-04-19",
+            employee=self.user,
+        )
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("60.00"))
+        self.credit.refresh_from_db()
+        self.assertEqual(self.credit.remaining_amount, Decimal("0.00"))
+
+        response = self.client.post(
+            reverse("credits:client_debt_payment_cancel", args=[payment.id]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.credit.refresh_from_db()
+        self.assertEqual(payment.status, ClientDebtPayment.STATUS_CANCELLED)
+        self.assertEqual(ClientDebtPayment.objects.count(), 1)
+        self.assertEqual(CreditPayment.objects.count(), 1)
+        self.assertEqual(self.credit.remaining_amount, Decimal("60.00"))
+        self.assertEqual(self.credit.status, self.credit.STATUS_UNPAID)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+        self.assertContains(response, "Отменена")
+
+    def test_client_payment_update_reallocates_debt_and_cash(self):
+        payment = ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("60.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-04-19",
+            employee=self.user,
+        )
+
+        response = self.client.post(
+            reverse("credits:client_debt_payment_update", args=[payment.id]),
+            {
+                "amount": "20.00",
+                "payment_method": ClientDebtPayment.PAYMENT_METHOD_TRANSFER,
+                "paid_at": "2026-04-20",
+                "comment": "Исправленная сумма",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.credit.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal("20.00"))
+        self.assertEqual(payment.payment_method, ClientDebtPayment.PAYMENT_METHOD_TRANSFER)
+        self.assertEqual(payment.allocations.count(), 1)
+        self.assertEqual(payment.allocations.get().amount, Decimal("20.00"))
+        self.assertEqual(self.credit.remaining_amount, Decimal("40.00"))
+        self.assertEqual(self.credit.status, self.credit.STATUS_PARTIAL)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("20.00"))
+
+    def test_client_payment_update_cannot_exceed_debt_with_current_payment(self):
+        payment = ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("20.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-04-19",
+            employee=self.user,
+        )
+
+        response = self.client.post(
+            reverse("credits:client_debt_payment_update", args=[payment.id]),
+            {
+                "amount": "70.00",
+                "payment_method": ClientDebtPayment.PAYMENT_METHOD_CASH,
+                "paid_at": "2026-04-20",
+                "comment": "Слишком много",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.credit.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal("20.00"))
+        self.assertEqual(self.credit.remaining_amount, Decimal("40.00"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("20.00"))
+
     def test_client_debt_api_routes(self):
         debt_response = self.client.get(
             reverse("credits:api_client_debt"),

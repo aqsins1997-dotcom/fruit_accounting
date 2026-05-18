@@ -8,12 +8,13 @@ from django.core.exceptions import ValidationError
 from django.db import connection
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.inventory.models import PurchaseItem
 
-from .forms import SupplierBalanceFilterForm, SupplierPaymentCreateForm
+from .forms import SupplierBalanceFilterForm, SupplierPaymentCreateForm, SupplierPaymentUpdateForm
 from .models import SupplierPayment, SupplierPaymentAllocation
 
 
@@ -88,10 +89,55 @@ def supplier_payment_create(request):
 
 
 @login_required
+def supplier_payment_update(request, pk):
+    payment = get_object_or_404(
+        SupplierPayment.objects.select_related("supplier", "store"),
+        pk=pk,
+    )
+    if payment.status == SupplierPayment.STATUS_CANCELLED:
+        messages.error(request, "Отменённую оплату поставщику нельзя изменить.")
+        return redirect("payables:supplier_payment_list")
+
+    if request.method == "POST":
+        form = SupplierPaymentUpdateForm(request.POST, instance=payment)
+        if form.is_valid():
+            try:
+                form.save()
+            except ValidationError as exc:
+                _attach_validation_error(form, exc)
+            else:
+                messages.success(request, "Оплата поставщику успешно обновлена.")
+                return redirect("payables:supplier_payment_list")
+    else:
+        form = SupplierPaymentUpdateForm(instance=payment)
+
+    recent_payments = SupplierPayment.objects.select_related("supplier", "store", "purchase")[:10]
+    context = {
+        "form": form,
+        "recent_payments": recent_payments,
+        "is_update": True,
+        "payment": payment,
+    }
+    return render(request, "payables/supplier_payment_form.html", context)
+
+
+@login_required
+@require_POST
+def supplier_payment_cancel(request, pk):
+    payment = get_object_or_404(SupplierPayment, pk=pk)
+    if payment.status == SupplierPayment.STATUS_CANCELLED:
+        messages.info(request, "Эта оплата уже отменена.")
+    else:
+        payment.cancel(reason=request.POST.get("cancel_reason", ""))
+        messages.success(request, "Оплата поставщику отменена. Долг и касса пересчитаны.")
+    return redirect("payables:supplier_payment_list")
+
+
+@login_required
 def supplier_payment_list(request):
     payments = (
         SupplierPayment.objects.select_related("supplier", "store", "purchase")
-        .prefetch_related("allocations")
+        .prefetch_related("allocations__purchase")
         .order_by("-date", "-id")
     )
     return render(request, "payables/supplier_payment_list.html", {"payments": payments})
@@ -172,7 +218,8 @@ def supplier_balances(request):
 
     if {"payment_id", "purchase_id", "store_id", "amount"}.issubset(allocation_columns):
         allocation_rows = SupplierPaymentAllocation.objects.filter(
-            purchase__deleted_at__isnull=True
+            purchase__deleted_at__isnull=True,
+            payment__status=SupplierPayment.STATUS_ACTIVE,
         ).values(
             "payment_id",
             "purchase_id",
@@ -200,7 +247,11 @@ def supplier_balances(request):
         if "purchase_id" in payment_columns:
             payment_value_fields.append("purchase_id")
 
-        payment_rows = list(SupplierPayment.objects.values(*payment_value_fields).order_by("date", "id"))
+        payment_rows = list(
+            SupplierPayment.objects.filter(status=SupplierPayment.STATUS_ACTIVE)
+            .values(*payment_value_fields)
+            .order_by("date", "id")
+        )
 
         for payment_row in payment_rows:
             remaining_payment = payment_row["amount"] or Decimal("0.00")

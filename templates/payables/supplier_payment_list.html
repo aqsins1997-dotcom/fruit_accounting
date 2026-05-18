@@ -22,8 +22,10 @@
                             <th>Магазин</th>
                             <th>Способ</th>
                             <th>Сумма</th>
+                            <th>Статус</th>
                             <th>Распределение</th>
                             <th>Комментарий</th>
+                            <th>Действия</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -35,6 +37,13 @@
                             <td>{{ payment.get_payment_method_display }}</td>
                             <td>{{ payment.amount|floatformat:2 }}</td>
                             <td>
+                                {% if payment.status == "cancelled" %}
+                                    <span class="badge badge--danger">Отменена</span>
+                                {% else %}
+                                    <span class="badge badge--success">Активна</span>
+                                {% endif %}
+                            </td>
+                            <td>
                                 {% for allocation in payment.allocations.all %}
                                     <div>Закупка №{{ allocation.purchase_id }}: {{ allocation.amount|floatformat:2 }}</div>
                                 {% empty %}
@@ -42,6 +51,27 @@
                                 {% endfor %}
                             </td>
                             <td>{{ payment.comment|default:"—" }}</td>
+                            <td>
+                                {% if payment.status == "active" %}
+                                    <div class="quick-actions" style="gap: 8px;">
+                                        <a href="{% url 'payables:supplier_payment_update' payment.pk %}" class="btn">Изменить</a>
+                                        <form method="post" action="{% url 'payables:supplier_payment_cancel' payment.pk %}">
+                                            {% csrf_token %}
+                                            <button
+                                                type="submit"
+                                                class="btn"
+                                                onclick="return confirm('Вы действительно хотите отменить эту оплату? Долг будет пересчитан.');"
+                                            >
+                                                Отменить
+                                            </button>
+                                        </form>
+                                    </div>
+                                {% else %}
+                                    <span class="page-subtitle">
+                                        {{ payment.cancelled_at|date:"d.m.Y H:i"|default:"Отменена" }}
+                                    </span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

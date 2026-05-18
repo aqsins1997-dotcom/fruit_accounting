@@ -21,9 +21,12 @@
                             <th>Магазин</th>
                             <th>Клиент</th>
                             <th>Сумма</th>
+                            <th>Статус</th>
+                            <th>Распределение</th>
                             <th>Способ оплаты</th>
                             <th>Комментарий</th>
                             <th>Сотрудник</th>
+                            <th>Действия</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33,9 +36,44 @@
                             <td>{{ payment.store.name }}</td>
                             <td>{{ payment.client.name }}</td>
                             <td>{{ payment.amount|floatformat:2 }}</td>
+                            <td>
+                                {% if payment.status == "cancelled" %}
+                                    <span class="badge badge--danger">Отменена</span>
+                                {% else %}
+                                    <span class="badge badge--success">Активна</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% for allocation in payment.allocations.all %}
+                                    <div>Продажа №{{ allocation.credit.sale_id }}: {{ allocation.amount|floatformat:2 }}</div>
+                                {% empty %}
+                                    <span class="page-subtitle">Без распределения</span>
+                                {% endfor %}
+                            </td>
                             <td>{{ payment.get_payment_method_display }}</td>
                             <td>{{ payment.comment|default:"—" }}</td>
                             <td>{{ payment.employee.username|default:"—" }}</td>
+                            <td>
+                                {% if payment.status == "active" %}
+                                    <div class="quick-actions" style="gap: 8px;">
+                                        <a href="{% url 'credits:client_debt_payment_update' payment.pk %}" class="btn">Изменить</a>
+                                        <form method="post" action="{% url 'credits:client_debt_payment_cancel' payment.pk %}">
+                                            {% csrf_token %}
+                                            <button
+                                                type="submit"
+                                                class="btn"
+                                                onclick="return confirm('Вы действительно хотите отменить эту оплату? Долг будет пересчитан.');"
+                                            >
+                                                Отменить
+                                            </button>
+                                        </form>
+                                    </div>
+                                {% else %}
+                                    <span class="page-subtitle">
+                                        {{ payment.cancelled_at|date:"d.m.Y H:i"|default:"Отменена" }}
+                                    </span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

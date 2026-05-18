@@ -35,11 +35,16 @@ def get_client_debt(*, store_id=None, client_id=None, store=None, client=None, e
         "original_amount",
     )
 
-    client_payments = ClientDebtPayment.objects.filter(store_id=store_id, client_id=client_id)
+    active_allocations = CreditPayment.objects.filter(
+        credit__store_id=store_id,
+        credit__customer_id=client_id,
+        credit__sale__deleted_at__isnull=True,
+        client_debt_payment__status=ClientDebtPayment.STATUS_ACTIVE,
+    )
     if exclude_payment_id:
-        client_payments = client_payments.exclude(pk=exclude_payment_id)
+        active_allocations = active_allocations.exclude(client_debt_payment_id=exclude_payment_id)
 
-    total_paid = _sum_amount(client_payments)
+    total_paid = _sum_amount(active_allocations)
     total_paid += _sum_amount(
         CreditPayment.objects.filter(
             credit__store_id=store_id,
@@ -61,7 +66,10 @@ def build_debtor_rows(*, store=None, search=""):
     credits = Credit.objects.select_related("store", "customer").filter(
         sale__deleted_at__isnull=True
     )
-    client_payments = ClientDebtPayment.objects.select_related("store", "client").all()
+    active_allocations = CreditPayment.objects.filter(
+        client_debt_payment__status=ClientDebtPayment.STATUS_ACTIVE,
+        credit__sale__deleted_at__isnull=True,
+    )
     legacy_payments = CreditPayment.objects.filter(client_debt_payment__isnull=True).select_related(
         "credit__store",
         "credit__customer",
@@ -69,15 +77,16 @@ def build_debtor_rows(*, store=None, search=""):
 
     if store:
         credits = credits.filter(store=store)
-        client_payments = client_payments.filter(store=store)
+        active_allocations = active_allocations.filter(credit__store=store)
         legacy_payments = legacy_payments.filter(credit__store=store)
 
     if search:
         credits = credits.filter(
             Q(customer__name__icontains=search) | Q(customer__phone__icontains=search)
         )
-        client_payments = client_payments.filter(
-            Q(client__name__icontains=search) | Q(client__phone__icontains=search)
+        active_allocations = active_allocations.filter(
+            Q(credit__customer__name__icontains=search) |
+            Q(credit__customer__phone__icontains=search)
         )
         legacy_payments = legacy_payments.filter(
             Q(credit__customer__name__icontains=search) |
@@ -93,8 +102,8 @@ def build_debtor_rows(*, store=None, search=""):
     ).annotate(total_taken=Coalesce(Sum("original_amount"), _money_value()))
 
     payment_totals = {
-        (row["store_id"], row["client_id"]): row["total_paid"] or ZERO
-        for row in client_payments.values("store_id", "client_id").annotate(
+        (row["credit__store_id"], row["credit__customer_id"]): row["total_paid"] or ZERO
+        for row in active_allocations.values("credit__store_id", "credit__customer_id").annotate(
             total_paid=Coalesce(Sum("amount"), _money_value())
         )
     }

@@ -105,6 +105,7 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
             SupplierPaymentAllocation.objects.filter(
                 purchase=self.instance.purchase,
                 store=self.instance.store,
+                payment__status="active",
             ).aggregate(total=Sum("amount"))["total"]
             or Decimal("0.00")
         )

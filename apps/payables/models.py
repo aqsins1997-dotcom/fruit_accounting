@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from apps.core.models import Store, Supplier
 from apps.inventory.models import Purchase, PurchaseItem
@@ -57,12 +58,14 @@ def rebuild_supplier_payment_allocations(*, supplier_id, store_id):
         SupplierPayment.objects.filter(
             supplier_id=supplier_id,
             store_id=store_id,
+            status=SupplierPayment.STATUS_ACTIVE,
         ).order_by("date", "id")
     )
 
     SupplierPaymentAllocation.objects.filter(
         payment__supplier_id=supplier_id,
         payment__store_id=store_id,
+        payment__status=SupplierPayment.STATUS_ACTIVE,
     ).delete()
 
     allocations_to_create = []
@@ -138,11 +141,17 @@ def get_supplier_remaining_debt(*, supplier_id, store_id, exclude_payment_id=Non
         or Decimal("0.00")
     )
 
-    payments = SupplierPayment.objects.filter(supplier_id=supplier_id, store_id=store_id)
+    allocations = SupplierPaymentAllocation.objects.filter(
+        payment__supplier_id=supplier_id,
+        payment__store_id=store_id,
+        payment__status=SupplierPayment.STATUS_ACTIVE,
+        purchase__deleted_at__isnull=True,
+        store_id=store_id,
+    )
     if exclude_payment_id:
-        payments = payments.exclude(pk=exclude_payment_id)
+        allocations = allocations.exclude(payment_id=exclude_payment_id)
 
-    paid_total = payments.aggregate(
+    paid_total = allocations.aggregate(
         total=Coalesce(
             Sum("amount"),
             Value(Decimal("0.00"), output_field=money_field),
@@ -156,6 +165,14 @@ def get_supplier_remaining_debt(*, supplier_id, store_id, exclude_payment_id=Non
 
 
 class SupplierPayment(TimeStampedModel):
+    STATUS_ACTIVE = "active"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Активна"),
+        (STATUS_CANCELLED, "Отменена"),
+    )
+
     PAYMENT_METHOD_CASH = "cash"
     PAYMENT_METHOD_CARD = "card"
     PAYMENT_METHOD_TRANSFER = "transfer"
@@ -202,6 +219,21 @@ class SupplierPayment(TimeStampedModel):
         blank=True,
         verbose_name="Комментарий",
     )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+        verbose_name="Статус",
+    )
+    cancelled_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name="Дата отмены",
+    )
+    cancel_reason = models.TextField(
+        blank=True,
+        verbose_name="Причина отмены",
+    )
 
     class Meta:
         verbose_name = "Оплата поставщику"
@@ -210,6 +242,7 @@ class SupplierPayment(TimeStampedModel):
         indexes = [
             models.Index(fields=["supplier", "store", "date"]),
             models.Index(fields=["purchase", "store"]),
+            models.Index(fields=["status"]),
         ]
 
     def __str__(self):
@@ -220,20 +253,21 @@ class SupplierPayment(TimeStampedModel):
         if self.amount is None or self.amount <= Decimal("0.00"):
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
 
-        remaining_debt = get_supplier_remaining_debt(
-            supplier_id=self.supplier_id,
-            store_id=self.store_id,
-            exclude_payment_id=self.pk,
-        )
-        if self.amount and self.amount > remaining_debt:
-            raise ValidationError(
-                {
-                    "amount": (
-                        "Сумма оплаты не может быть больше текущего долга поставщика. "
-                        f"Текущий долг: {remaining_debt}."
-                    )
-                }
+        if self.status == self.STATUS_ACTIVE:
+            remaining_debt = get_supplier_remaining_debt(
+                supplier_id=self.supplier_id,
+                store_id=self.store_id,
+                exclude_payment_id=self.pk,
             )
+            if self.amount and self.amount > remaining_debt:
+                raise ValidationError(
+                    {
+                        "amount": (
+                            "Сумма оплаты не может быть больше текущего долга поставщика. "
+                            f"Текущий долг: {remaining_debt}."
+                        )
+                    }
+                )
 
         if self.purchase_id:
             errors = {}
@@ -261,9 +295,22 @@ class SupplierPayment(TimeStampedModel):
                 previous_supplier_id = previous.supplier_id
                 previous_store_id = previous.store_id
 
-            from apps.expenses.services import _apply_cash_outflow
+            from apps.expenses.services import _get_cash_register, _save_cash_register, _validate_cash_outflow
 
-            _apply_cash_outflow(self, previous_instance=previous)
+            if previous and previous.status == self.STATUS_ACTIVE:
+                previous_register = _get_cash_register(previous.store)
+                previous_register.balance += previous.amount
+                _save_cash_register(previous_register)
+
+            if self.status == self.STATUS_ACTIVE:
+                register = _get_cash_register(self.store)
+                _validate_cash_outflow(
+                    store=self.store,
+                    amount=self.amount,
+                    available_amount=register.balance,
+                )
+                register.balance -= self.amount
+                _save_cash_register(register)
 
             super().save(*args, **kwargs)
 
@@ -278,21 +325,24 @@ class SupplierPayment(TimeStampedModel):
                 )
 
     def delete(self, *args, **kwargs):
+        self.cancel(reason="Удаление заменено безопасной отменой оплаты.")
+
+    def cancel(self, *, reason=""):
         with transaction.atomic():
-            supplier_id = self.supplier_id
-            store_id = self.store_id
-
-            from apps.expenses.services import _get_cash_register, _save_cash_register
-
-            register = _get_cash_register(self.store)
-            register.balance += self.amount
-            _save_cash_register(register)
-
-            super().delete(*args, **kwargs)
+            payment = SupplierPayment.objects.select_for_update().get(pk=self.pk)
+            if payment.status == self.STATUS_CANCELLED:
+                return payment
+            supplier_id = payment.supplier_id
+            store_id = payment.store_id
+            payment.status = self.STATUS_CANCELLED
+            payment.cancelled_at = timezone.now()
+            payment.cancel_reason = reason or payment.cancel_reason
+            payment.save()
             rebuild_supplier_payment_allocations(
                 supplier_id=supplier_id,
                 store_id=store_id,
             )
+            return payment
 
 
 class SupplierPaymentAllocation(TimeStampedModel):

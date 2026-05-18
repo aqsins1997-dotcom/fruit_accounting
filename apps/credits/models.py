@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models import Q
+from django.utils import timezone
 
 from apps.core.models import Customer, Store
 from apps.sales.models import Sale, CashRegister
@@ -92,7 +94,16 @@ class Credit(TimeStampedModel):
             raise ValidationError({"remaining_amount": "Остаток долга не может быть больше исходной суммы."})
 
     def recalculate(self):
-        paid_amount = sum((payment.amount for payment in self.payments.all()), Decimal("0.00"))
+        paid_amount = sum(
+            (
+                payment.amount
+                for payment in self.payments.filter(
+                    Q(client_debt_payment__isnull=True)
+                    | Q(client_debt_payment__status=ClientDebtPayment.STATUS_ACTIVE)
+                )
+            ),
+            Decimal("0.00"),
+        )
         remaining = self.original_amount - paid_amount
 
         if remaining < 0:
@@ -111,6 +122,14 @@ class Credit(TimeStampedModel):
 
 
 class ClientDebtPayment(TimeStampedModel):
+    STATUS_ACTIVE = "active"
+    STATUS_CANCELLED = "cancelled"
+
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Активна"),
+        (STATUS_CANCELLED, "Отменена"),
+    )
+
     PAYMENT_METHOD_CASH = "cash"
     PAYMENT_METHOD_CARD = "card"
     PAYMENT_METHOD_TRANSFER = "transfer"
@@ -150,6 +169,21 @@ class ClientDebtPayment(TimeStampedModel):
         verbose_name="Комментарий",
     )
     paid_at = models.DateField(verbose_name="Дата оплаты")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+        verbose_name="Статус",
+    )
+    cancelled_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name="Дата отмены",
+    )
+    cancel_reason = models.TextField(
+        blank=True,
+        verbose_name="Причина отмены",
+    )
     employee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -169,6 +203,7 @@ class ClientDebtPayment(TimeStampedModel):
             models.Index(fields=["store", "client"]),
             models.Index(fields=["paid_at"]),
             models.Index(fields=["payment_method"]),
+            models.Index(fields=["status"]),
         ]
 
     def __str__(self):
@@ -177,6 +212,9 @@ class ClientDebtPayment(TimeStampedModel):
     def clean(self):
         if self.amount is not None and self.amount <= 0:
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
+
+        if self.status == self.STATUS_CANCELLED:
+            return
 
         if self.amount and self.store_id and self.client_id:
             from .services import get_client_debt
@@ -206,6 +244,10 @@ class ClientDebtPayment(TimeStampedModel):
     def _delete_allocations(self):
         for allocation in list(self.allocations.select_related("credit")):
             allocation.delete()
+
+    def _recalculate_allocated_credits(self, credit_ids):
+        for credit in Credit.objects.filter(id__in=set(credit_ids)):
+            credit.recalculate()
 
     def _create_allocations(self):
         remaining_to_allocate = self.amount
@@ -244,8 +286,10 @@ class ClientDebtPayment(TimeStampedModel):
     def save(self, *args, **kwargs):
         with transaction.atomic():
             previous = None
+            previous_credit_ids = []
             if self.pk:
                 previous = ClientDebtPayment.objects.select_for_update().get(pk=self.pk)
+                previous_credit_ids = list(previous.allocations.values_list("credit_id", flat=True))
 
             if self.store_id and self.client_id:
                 list(
@@ -267,21 +311,37 @@ class ClientDebtPayment(TimeStampedModel):
             self.full_clean()
 
             if previous:
-                previous._delete_allocations()
-                self._apply_cash_delta(
-                    store_id=previous.store_id,
-                    amount=-previous.amount,
-                )
+                if previous.status == self.STATUS_ACTIVE:
+                    self._apply_cash_delta(
+                        store_id=previous.store_id,
+                        amount=-previous.amount,
+                    )
+
+                if self.status == self.STATUS_ACTIVE:
+                    previous._delete_allocations()
+                elif previous.status == self.STATUS_ACTIVE:
+                    self._recalculate_allocated_credits(previous_credit_ids)
 
             super().save(*args, **kwargs)
-            self._apply_cash_delta(store_id=self.store_id, amount=self.amount)
-            self._create_allocations()
+            if self.status == self.STATUS_ACTIVE:
+                self._apply_cash_delta(store_id=self.store_id, amount=self.amount)
+                self._create_allocations()
+            else:
+                self._recalculate_allocated_credits(previous_credit_ids)
 
     def delete(self, *args, **kwargs):
+        self.cancel(reason="Удаление заменено безопасной отменой оплаты.")
+
+    def cancel(self, *, reason=""):
         with transaction.atomic():
-            self._delete_allocations()
-            self._apply_cash_delta(store_id=self.store_id, amount=-self.amount)
-            super().delete(*args, **kwargs)
+            payment = ClientDebtPayment.objects.select_for_update().get(pk=self.pk)
+            if payment.status == self.STATUS_CANCELLED:
+                return payment
+            payment.status = self.STATUS_CANCELLED
+            payment.cancelled_at = timezone.now()
+            payment.cancel_reason = reason or payment.cancel_reason
+            payment.save()
+            return payment
 
 
 class CreditPayment(TimeStampedModel):
