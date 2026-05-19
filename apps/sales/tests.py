@@ -664,3 +664,137 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(breakdown["supplier_payments"], Decimal("0.00"))
         self.assertEqual(breakdown["formula_balance"], Decimal("0.00"))
         self.assertEqual(breakdown["stored_balance"], Decimal("0.00"))
+
+    def test_repair_saleitem_allocations_fixes_safe_one_batch_mismatch(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-22")
+        purchase_item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("40.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-23",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("34.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+        sale_item._selected_purchase_item = purchase_item
+        sale_item.save()
+
+        batch = SaleItemBatch.objects.get(sale_item=sale_item)
+        SaleItemBatch.objects.filter(pk=batch.pk).update(quantity=Decimal("25.800"))
+        SaleItem.objects.filter(pk=sale_item.pk).update(
+            cost_price_per_kg=Decimal("7.59"),
+            line_cost_total=Decimal("258.00"),
+            profit=Decimal("422.00"),
+        )
+        sale_item.refresh_from_db()
+        self.assertEqual(SaleItemBatch.objects.get(pk=batch.pk).quantity, Decimal("25.800"))
+
+        audit_stdout = StringIO()
+        with self.assertRaises(SystemExit) as exc:
+            call_command("audit_accounting_integrity", stdout=audit_stdout)
+        self.assertEqual(exc.exception.code, 1)
+        self.assertIn(
+            f"SaleItem #{sale_item.id} batch quantity 25.800 does not match sale quantity 34.000.",
+            audit_stdout.getvalue(),
+        )
+
+        dry_run_stdout = StringIO()
+        call_command(
+            "repair_saleitem_allocations",
+            "--sale-item-id",
+            str(sale_item.id),
+            stdout=dry_run_stdout,
+        )
+        self.assertIn("WOULD REPAIR", dry_run_stdout.getvalue())
+        self.assertEqual(SaleItemBatch.objects.get(pk=batch.pk).quantity, Decimal("25.800"))
+
+        apply_stdout = StringIO()
+        call_command(
+            "repair_saleitem_allocations",
+            "--sale-item-id",
+            str(sale_item.id),
+            "--apply",
+            stdout=apply_stdout,
+        )
+        self.assertIn("REPAIRED", apply_stdout.getvalue())
+
+        sale_item.refresh_from_db()
+        batch = SaleItemBatch.objects.get(sale_item=sale_item)
+        sale.refresh_from_db()
+        self.assertEqual(batch.quantity, Decimal("34.000"))
+        self.assertEqual(batch.total_amount, Decimal("680.00"))
+        self.assertEqual(sale_item.line_cost_total, Decimal("340.00"))
+        self.assertEqual(sale_item.profit, Decimal("340.00"))
+        self.assertEqual(sale.total_cost, Decimal("340.00"))
+        self.assertEqual(sale.total_profit, Decimal("340.00"))
+
+        clean_audit_stdout = StringIO()
+        call_command("audit_accounting_integrity", stdout=clean_audit_stdout)
+        self.assertIn("CRITICAL: 0", clean_audit_stdout.getvalue())
+
+    def test_repair_saleitem_allocations_skips_ambiguous_multi_batch_case(self):
+        first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-22")
+        first_item = PurchaseItem.objects.create(
+            purchase=first_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("40.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-23")
+        second_item = PurchaseItem.objects.create(
+            purchase=second_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("40.000"),
+            purchase_price_per_kg=Decimal("12.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-24",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("34.000"),
+            sale_price_per_kg=Decimal("20.00"),
+        )
+        sale_item._selected_purchase_item = first_item
+        sale_item.save()
+
+        original_batch = SaleItemBatch.objects.get(sale_item=sale_item)
+        SaleItemBatch.objects.filter(pk=original_batch.pk).update(quantity=Decimal("20.000"))
+        SaleItemBatch.objects.create(
+            sale_item=sale_item,
+            purchase_item=second_item,
+            quantity=Decimal("5.800"),
+            sale_price=Decimal("20.00"),
+            total_amount=Decimal("116.00"),
+        )
+
+        output = StringIO()
+        call_command(
+            "repair_saleitem_allocations",
+            "--sale-item-id",
+            str(sale_item.id),
+            "--apply",
+            stdout=output,
+        )
+
+        self.assertIn("SKIP: Ambiguous: more than one active batch is linked to this sale item.", output.getvalue())
+        quantities = list(
+            SaleItemBatch.objects.filter(sale_item=sale_item)
+            .order_by("id")
+            .values_list("quantity", flat=True)
+        )
+        self.assertEqual(quantities, [Decimal("20.000"), Decimal("5.800")])
