@@ -249,6 +249,13 @@ class SupplierPayment(TimeStampedModel):
         purchase_part = f" | закупка #{self.purchase_id}" if self.purchase_id else ""
         return f"{self.store} | {self.supplier}{purchase_part} | {self.amount}"
 
+    def _cash_contribution(self):
+        if self.status != self.STATUS_ACTIVE:
+            return None, Decimal("0.00")
+        if self.payment_method != self.PAYMENT_METHOD_CASH:
+            return None, Decimal("0.00")
+        return self.store_id, self.amount or Decimal("0.00")
+
     def clean(self):
         if self.amount is None or self.amount <= Decimal("0.00"):
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
@@ -290,27 +297,43 @@ class SupplierPayment(TimeStampedModel):
             previous = None
             previous_supplier_id = None
             previous_store_id = None
+            previous_cash_store_id = None
+            previous_cash_amount = Decimal("0.00")
             if self.pk:
                 previous = SupplierPayment.objects.select_for_update().select_related("store").get(pk=self.pk)
                 previous_supplier_id = previous.supplier_id
                 previous_store_id = previous.store_id
+                previous_cash_store_id, previous_cash_amount = previous._cash_contribution()
 
             from apps.expenses.services import _get_cash_register, _save_cash_register, _validate_cash_outflow
 
-            if previous and previous.status == self.STATUS_ACTIVE:
-                previous_register = _get_cash_register(previous.store)
-                previous_register.balance += previous.amount
-                _save_cash_register(previous_register)
+            current_cash_store_id, current_cash_amount = self._cash_contribution()
 
-            if self.status == self.STATUS_ACTIVE:
+            if previous_cash_store_id == current_cash_store_id and current_cash_store_id:
                 register = _get_cash_register(self.store)
+                available_amount = register.balance + previous_cash_amount
                 _validate_cash_outflow(
                     store=self.store,
-                    amount=self.amount,
-                    available_amount=register.balance,
+                    amount=current_cash_amount,
+                    available_amount=available_amount,
                 )
-                register.balance -= self.amount
+                register.balance = available_amount - current_cash_amount
                 _save_cash_register(register)
+            else:
+                if previous_cash_store_id and previous_cash_amount > Decimal("0.00"):
+                    previous_register = _get_cash_register(previous.store)
+                    previous_register.balance += previous_cash_amount
+                    _save_cash_register(previous_register)
+
+                if current_cash_store_id and current_cash_amount > Decimal("0.00"):
+                    register = _get_cash_register(self.store)
+                    _validate_cash_outflow(
+                        store=self.store,
+                        amount=current_cash_amount,
+                        available_amount=register.balance,
+                    )
+                    register.balance -= current_cash_amount
+                    _save_cash_register(register)
 
             super().save(*args, **kwargs)
 

@@ -191,7 +191,7 @@ class CreditNoAdminViewsTests(TestCase):
         self.assertEqual(payment.allocations.get().amount, Decimal("20.00"))
         self.assertEqual(self.credit.remaining_amount, Decimal("40.00"))
         self.assertEqual(self.credit.status, self.credit.STATUS_PARTIAL)
-        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("20.00"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
 
     def test_client_payment_update_cannot_exceed_debt_with_current_payment(self):
         payment = ClientDebtPayment.objects.create(
@@ -281,3 +281,18 @@ class CreditNoAdminViewsTests(TestCase):
         self.assertEqual(build_debtor_rows(), [])
         self.assertEqual(self.client.get(reverse("reports:debtors_report")).context["debtor_rows"], [])
         self.assertIn("Found payments without allocations: 1", stdout.getvalue())
+
+    def test_non_cash_client_payment_does_not_change_cash_register(self):
+        payment = ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("20.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_TRANSFER,
+            paid_at="2026-04-19",
+            employee=self.user,
+        )
+
+        self.credit.refresh_from_db()
+        self.assertEqual(self.credit.remaining_amount, Decimal("40.00"))
+        self.assertEqual(payment.allocations.count(), 1)
+        self.assertFalse(CashRegister.objects.filter(store=self.store).exists())

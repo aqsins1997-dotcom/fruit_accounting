@@ -618,3 +618,49 @@ class SalesNoAdminViewsTests(TestCase):
 
         self.assertIn("Applied cash correction", apply_output.getvalue())
         self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("200.00"))
+
+    def test_cash_breakdown_ignores_non_cash_client_and_supplier_payments(self):
+        customer = Customer.objects.create(name="Debt customer")
+        credit_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            customer=customer,
+        )
+        SaleItem.objects.create(
+            sale=credit_sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("100.00"),
+        )
+        ClientDebtPayment.objects.create(
+            store=self.store,
+            client=customer,
+            amount=Decimal("200.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_TRANSFER,
+            paid_at="2026-04-20",
+        )
+
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-19")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("40.00"),
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-04-20",
+            payment_method=SupplierPayment.PAYMENT_METHOD_TRANSFER,
+            amount=Decimal("100.00"),
+        )
+
+        breakdown = build_cash_breakdown(self.store)
+
+        self.assertEqual(breakdown["client_debt_payments"], Decimal("0.00"))
+        self.assertEqual(breakdown["supplier_payments"], Decimal("0.00"))
+        self.assertEqual(breakdown["formula_balance"], Decimal("0.00"))
+        self.assertEqual(breakdown["stored_balance"], Decimal("0.00"))

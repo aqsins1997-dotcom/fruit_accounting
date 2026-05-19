@@ -377,7 +377,7 @@ class SupplierBalancesViewTests(TestCase):
         payment.refresh_from_db()
         self.assertEqual(payment.amount, Decimal("100000.00"))
         self.assertEqual(payment.payment_method, SupplierPayment.PAYMENT_METHOD_TRANSFER)
-        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("400000.00"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("500000.00"))
         allocations = list(
             SupplierPaymentAllocation.objects.filter(payment=payment)
             .order_by("purchase__date", "purchase_id")
@@ -643,3 +643,26 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(group["paid_amount"], Decimal("200.00"))
         self.assertEqual(group["remaining_amount"], Decimal("300.00"))
         self.assertIn("Found payments without allocations: 1", stdout.getvalue())
+
+    def test_non_cash_supplier_payment_does_not_reduce_cash_and_works_without_balance(self):
+        CashRegister.objects.filter(store=self.store).update(balance=Decimal("0.00"))
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("50.00"),
+        )
+
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            date="2026-04-11",
+            payment_method=SupplierPayment.PAYMENT_METHOD_TRANSFER,
+            amount=Decimal("200.00"),
+        )
+
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+        allocations = list(payment.allocations.values_list("purchase_id", "amount"))
+        self.assertEqual(allocations, [(purchase.id, Decimal("200.00"))])

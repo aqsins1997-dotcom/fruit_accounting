@@ -241,6 +241,13 @@ class ClientDebtPayment(TimeStampedModel):
         cash_register.balance += amount
         cash_register.save(update_fields=["balance", "updated_at"])
 
+    def _cash_contribution(self):
+        if self.status != self.STATUS_ACTIVE:
+            return None, Decimal("0.00")
+        if self.payment_method != self.PAYMENT_METHOD_CASH:
+            return None, Decimal("0.00")
+        return self.store_id, self.amount or Decimal("0.00")
+
     def _delete_allocations(self):
         for allocation in list(self.allocations.select_related("credit")):
             allocation.delete()
@@ -287,9 +294,12 @@ class ClientDebtPayment(TimeStampedModel):
         with transaction.atomic():
             previous = None
             previous_credit_ids = []
+            previous_store_id = None
+            previous_cash_amount = Decimal("0.00")
             if self.pk:
                 previous = ClientDebtPayment.objects.select_for_update().get(pk=self.pk)
                 previous_credit_ids = list(previous.allocations.values_list("credit_id", flat=True))
+                previous_store_id, previous_cash_amount = previous._cash_contribution()
 
             if self.store_id and self.client_id:
                 list(
@@ -311,20 +321,34 @@ class ClientDebtPayment(TimeStampedModel):
             self.full_clean()
 
             if previous:
-                if previous.status == self.STATUS_ACTIVE:
-                    self._apply_cash_delta(
-                        store_id=previous.store_id,
-                        amount=-previous.amount,
-                    )
-
                 if self.status == self.STATUS_ACTIVE:
                     previous._delete_allocations()
                 elif previous.status == self.STATUS_ACTIVE:
                     self._recalculate_allocated_credits(previous_credit_ids)
 
             super().save(*args, **kwargs)
+            current_store_id, current_cash_amount = self._cash_contribution()
+            if previous:
+                if previous_store_id == current_store_id:
+                    self._apply_cash_delta(
+                        store_id=current_store_id,
+                        amount=current_cash_amount - previous_cash_amount,
+                    )
+                else:
+                    self._apply_cash_delta(
+                        store_id=previous_store_id,
+                        amount=-previous_cash_amount,
+                    )
+                    self._apply_cash_delta(
+                        store_id=current_store_id,
+                        amount=current_cash_amount,
+                    )
             if self.status == self.STATUS_ACTIVE:
-                self._apply_cash_delta(store_id=self.store_id, amount=self.amount)
+                if not previous:
+                    self._apply_cash_delta(
+                        store_id=current_store_id,
+                        amount=current_cash_amount,
+                    )
                 self._create_allocations()
             else:
                 self._recalculate_allocated_credits(previous_credit_ids)
