@@ -15,7 +15,7 @@ from apps.inventory.models import Purchase, PurchaseItem, StoreStock, calculate_
 from apps.payables.models import SupplierPayment
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
-from .models import CashRegister, Sale, SaleItem, SaleItemBatch
+from .models import CashRegister, Sale, SaleItem, SaleItemBatch, purchase_item_available_quantity
 from .services import build_cash_breakdown, recalculate_cash_registers
 
 
@@ -798,3 +798,235 @@ class SalesNoAdminViewsTests(TestCase):
             .values_list("quantity", flat=True)
         )
         self.assertEqual(quantities, [Decimal("20.000"), Decimal("5.800")])
+
+    def test_repair_saleitem_14_batch_mismatch_moves_later_sale_to_safe_batch(self):
+        product = Product.objects.create(name="Клубника")
+        source_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-13")
+        source_item = PurchaseItem.objects.create(
+            purchase=source_purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("60.000"),
+            purchase_price_per_kg=Decimal("200.00"),
+        )
+        alternative_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-13")
+        alternative_item = PurchaseItem.objects.create(
+            purchase=alternative_purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("20.000"),
+            purchase_price_per_kg=Decimal("210.00"),
+        )
+
+        target_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-13",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        target_item = SaleItem(
+            sale=target_sale,
+            product=product,
+            quantity_kg=Decimal("34.000"),
+            sale_price_per_kg=Decimal("291.18"),
+        )
+        target_item._selected_purchase_item = source_item
+        target_item.save()
+        target_batch = SaleItemBatch.objects.get(sale_item=target_item)
+        SaleItemBatch.objects.filter(pk=target_batch.pk).update(
+            quantity=Decimal("25.800"),
+            total_amount=Decimal("7512.44"),
+        )
+        SaleItem.objects.filter(pk=target_item.pk).update(
+            line_total=Decimal("9900.00"),
+            line_cost_total=Decimal("5160.00"),
+            profit=Decimal("4740.00"),
+            sale_price_per_kg=Decimal("291.18"),
+        )
+        Sale.objects.filter(pk=target_sale.pk).update(
+            total_amount=Decimal("9900.00"),
+            total_cost=Decimal("5160.00"),
+            total_profit=Decimal("4740.00"),
+        )
+        target_item.refresh_from_db()
+
+        later_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-14",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        later_item = SaleItem(
+            sale=later_sale,
+            product=product,
+            quantity_kg=Decimal("10.000"),
+            sale_price_per_kg=Decimal("300.00"),
+        )
+        later_item._selected_purchase_item = source_item
+        later_item.save()
+        recalculate_cash_registers(store=self.store)
+
+        audit_before = StringIO()
+        with self.assertRaises(SystemExit):
+            call_command("audit_accounting_integrity", stdout=audit_before)
+        self.assertIn(
+            f"SaleItem #{target_item.id} batch quantity 25.800 does not match sale quantity 34.000.",
+            audit_before.getvalue(),
+        )
+
+        dry_run_output = StringIO()
+        call_command(
+            "repair_saleitem_14_batch_mismatch",
+            "--sale-item-id",
+            str(target_item.id),
+            "--purchase-item-id",
+            str(source_item.id),
+            stdout=dry_run_output,
+        )
+        self.assertIn("WOULD APPLY", dry_run_output.getvalue())
+        self.assertIn(f"purchase_item #{alternative_item.id}", dry_run_output.getvalue())
+
+        apply_output = StringIO()
+        call_command(
+            "repair_saleitem_14_batch_mismatch",
+            "--sale-item-id",
+            str(target_item.id),
+            "--purchase-item-id",
+            str(source_item.id),
+            "--apply",
+            stdout=apply_output,
+        )
+        self.assertIn("audit_accounting_integrity summary: CRITICAL=0", apply_output.getvalue())
+
+        target_item.refresh_from_db()
+        later_item.refresh_from_db()
+        target_batches = list(SaleItemBatch.objects.filter(sale_item=target_item).order_by("id"))
+        later_batches = list(SaleItemBatch.objects.filter(sale_item=later_item).order_by("purchase_item_id", "id"))
+        self.assertEqual(len(target_batches), 1)
+        self.assertEqual(target_batches[0].purchase_item_id, source_item.id)
+        self.assertEqual(target_batches[0].quantity, Decimal("34.000"))
+
+        self.assertEqual(len(later_batches), 2)
+        self.assertEqual(later_batches[0].purchase_item_id, source_item.id)
+        self.assertEqual(later_batches[0].quantity, Decimal("1.800"))
+        self.assertEqual(later_batches[1].purchase_item_id, alternative_item.id)
+        self.assertEqual(later_batches[1].quantity, Decimal("8.200"))
+
+        self.assertEqual(target_item.line_cost_total, Decimal("6800.00"))
+        self.assertEqual(target_item.profit, Decimal("3100.00"))
+        self.assertEqual(later_item.line_cost_total, Decimal("2082.00"))
+        self.assertEqual(later_item.profit, Decimal("918.00"))
+
+        clean_audit = StringIO()
+        call_command("audit_accounting_integrity", stdout=clean_audit)
+        self.assertIn("CRITICAL: 0", clean_audit.getvalue())
+
+    def test_repair_saleitem_14_batch_mismatch_skips_when_no_safe_alternative_batch_exists(self):
+        product = Product.objects.create(name="Клубника")
+        source_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-13")
+        source_item = PurchaseItem.objects.create(
+            purchase=source_purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("60.000"),
+            purchase_price_per_kg=Decimal("200.00"),
+        )
+        target_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-13",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        target_item = SaleItem(
+            sale=target_sale,
+            product=product,
+            quantity_kg=Decimal("34.000"),
+            sale_price_per_kg=Decimal("291.18"),
+        )
+        target_item._selected_purchase_item = source_item
+        target_item.save()
+        target_batch = SaleItemBatch.objects.get(sale_item=target_item)
+        SaleItemBatch.objects.filter(pk=target_batch.pk).update(quantity=Decimal("25.800"))
+
+        later_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-14",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        later_item = SaleItem(
+            sale=later_sale,
+            product=product,
+            quantity_kg=Decimal("10.000"),
+            sale_price_per_kg=Decimal("300.00"),
+        )
+        later_item._selected_purchase_item = source_item
+        later_item.save()
+
+        output = StringIO()
+        call_command(
+            "repair_saleitem_14_batch_mismatch",
+            "--sale-item-id",
+            str(target_item.id),
+            "--purchase-item-id",
+            str(source_item.id),
+            "--apply",
+            stdout=output,
+        )
+        self.assertIn("UNSAFE:", output.getvalue())
+        self.assertEqual(SaleItemBatch.objects.get(sale_item=target_item).quantity, Decimal("25.800"))
+        self.assertEqual(
+            list(
+                SaleItemBatch.objects.filter(sale_item=later_item)
+                .values_list("purchase_item_id", "quantity")
+            ),
+            [(source_item.id, Decimal("10.000"))],
+        )
+        self.assertEqual(purchase_item_available_quantity(source_item), Decimal("24.200"))
+
+    def test_repair_saleitem_14_batch_mismatch_skips_ambiguous_target_multi_batch_case(self):
+        product = Product.objects.create(name="Клубника")
+        first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-13")
+        first_item = PurchaseItem.objects.create(
+            purchase=first_purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("50.000"),
+            purchase_price_per_kg=Decimal("200.00"),
+        )
+        second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-13")
+        second_item = PurchaseItem.objects.create(
+            purchase=second_purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("50.000"),
+            purchase_price_per_kg=Decimal("210.00"),
+        )
+        target_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-13",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        target_item = SaleItem(
+            sale=target_sale,
+            product=product,
+            quantity_kg=Decimal("34.000"),
+            sale_price_per_kg=Decimal("291.18"),
+        )
+        target_item._selected_purchase_item = first_item
+        target_item.save()
+        original_batch = SaleItemBatch.objects.get(sale_item=target_item)
+        SaleItemBatch.objects.filter(pk=original_batch.pk).update(quantity=Decimal("20.000"))
+        SaleItemBatch.objects.create(
+            sale_item=target_item,
+            purchase_item=second_item,
+            quantity=Decimal("5.800"),
+            sale_price=Decimal("291.18"),
+            total_amount=Decimal("1688.84"),
+        )
+
+        output = StringIO()
+        call_command(
+            "repair_saleitem_14_batch_mismatch",
+            "--sale-item-id",
+            str(target_item.id),
+            "--apply",
+            stdout=output,
+        )
+        self.assertIn("UNSAFE: Ambiguous target sale item", output.getvalue())
