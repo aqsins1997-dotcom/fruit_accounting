@@ -27,11 +27,11 @@ class Command(BaseCommand):
         self._print_plan(plan)
 
         if not plan["repairable"]:
-            self.stdout.write(f"UNSAFE: {plan['reason']}")
+            self.stdout.write(f"UNSAFE NO APPLY: {plan['reason']}")
             return
 
         if not apply_changes:
-            self.stdout.write("WOULD APPLY: safe transfer plan is available.")
+            self.stdout.write("SAFE APPLY AVAILABLE")
             return
 
         result = apply_saleitem_batch_mismatch_repair(
@@ -83,6 +83,19 @@ class Command(BaseCommand):
                     f"batch #{batch['batch_id']}, sale_item #{batch['sale_item_id']}, "
                     f"sale #{batch['sale_id']}, date {batch['sale_date']}, allocated={batch['allocated_quantity']}"
                 )
+        if plan["first_later_batch"]:
+            first_later = plan["first_later_batch"]
+            self.stdout.write("  earliest later allocation check:")
+            self.stdout.write(
+                "    - "
+                f"sale_item #{first_later['sale_item_id']} currently has sale_qty={first_later['sale_quantity']} "
+                f"and allocated={first_later['allocated_quantity']}"
+            )
+            self.stdout.write(
+                "    - "
+                "simple shift without replacement would leave it mismatched: "
+                f"{first_later['would_mismatch_after_simple_shift']}"
+            )
         if plan["selected_candidate"]:
             candidate = plan["selected_candidate"]
             alternative = plan["selected_alternative_purchase_item"]
@@ -93,4 +106,9 @@ class Command(BaseCommand):
                 f"(sale_item #{candidate['sale_item_id']}) to purchase_item #{alternative['purchase_item_id']} "
                 f"(purchase #{alternative['purchase_id']}, date {alternative['purchase_date']}, "
                 f"available={alternative['available_quantity']})"
+            )
+            self.stdout.write(
+                "    - "
+                f"SaleItem #{candidate['sale_item_id']} stays valid because the same {plan['shortfall_quantity']} "
+                "will be reallocated to the alternative batch."
             )

@@ -173,6 +173,7 @@ def build_saleitem_batch_mismatch_repair_plan(*, sale_item_id=14, purchase_item_
         "source_purchase_item_id": None,
         "source_purchase_id": None,
         "candidate_later_batches": [],
+        "first_later_batch": None,
         "selected_candidate": None,
         "selected_alternative_purchase_item": None,
     }
@@ -205,6 +206,14 @@ def build_saleitem_batch_mismatch_repair_plan(*, sale_item_id=14, purchase_item_
             later_batches.append(batch)
 
     plan["candidate_later_batches"] = [_batch_row(batch) for batch in later_batches]
+    if later_batches:
+        first_batch = later_batches[0]
+        plan["first_later_batch"] = {
+            **_batch_row(first_batch),
+            "would_mismatch_without_reallocation": _qty(first_batch.quantity) != _qty(first_batch.sale_item.quantity_kg),
+            "would_mismatch_after_simple_shift": _qty(first_batch.quantity - shortfall_quantity)
+            != _qty(first_batch.sale_item.quantity_kg),
+        }
     if not later_batches:
         plan["reason"] = "No later allocations were found on the same purchase batch."
         return plan
@@ -234,6 +243,7 @@ def build_saleitem_batch_mismatch_repair_plan(*, sale_item_id=14, purchase_item_
         plan["selected_candidate"] = {
             **_batch_row(batch),
             "new_source_quantity": _qty(batch.quantity - shortfall_quantity),
+            "would_mismatch_after_simple_shift": True,
         }
         plan["selected_alternative_purchase_item"] = {
             "purchase_item_id": alternative["purchase_item"].id,

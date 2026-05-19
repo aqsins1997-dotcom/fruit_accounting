@@ -881,8 +881,9 @@ class SalesNoAdminViewsTests(TestCase):
             str(source_item.id),
             stdout=dry_run_output,
         )
-        self.assertIn("WOULD APPLY", dry_run_output.getvalue())
+        self.assertIn("SAFE APPLY AVAILABLE", dry_run_output.getvalue())
         self.assertIn(f"purchase_item #{alternative_item.id}", dry_run_output.getvalue())
+        self.assertIn("simple shift without replacement would leave it mismatched: True", dry_run_output.getvalue())
 
         apply_output = StringIO()
         call_command(
@@ -969,7 +970,8 @@ class SalesNoAdminViewsTests(TestCase):
             "--apply",
             stdout=output,
         )
-        self.assertIn("UNSAFE:", output.getvalue())
+        self.assertIn("UNSAFE NO APPLY:", output.getvalue())
+        self.assertIn("simple shift without replacement would leave it mismatched: True", output.getvalue())
         self.assertEqual(SaleItemBatch.objects.get(sale_item=target_item).quantity, Decimal("25.800"))
         self.assertEqual(
             list(
@@ -1029,4 +1031,4 @@ class SalesNoAdminViewsTests(TestCase):
             "--apply",
             stdout=output,
         )
-        self.assertIn("UNSAFE: Ambiguous target sale item", output.getvalue())
+        self.assertIn("UNSAFE NO APPLY: Ambiguous target sale item", output.getvalue())

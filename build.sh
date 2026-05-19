@@ -4,9 +4,9 @@ set -o errexit
 pip install -r requirements.txt
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
-echo "=== START PURCHASE ITEM 9 FORENSIC ==="
-python manage.py inspect_purchase_batch_allocations --purchase-item-id 9 || true
-echo "=== END PURCHASE ITEM 9 FORENSIC ==="
+echo "=== START SALEITEM 14 TARGETED REPAIR DRY RUN ==="
+python manage.py repair_saleitem_14_batch_mismatch --sale-item-id 14 --purchase-item-id 9 || true
+echo "=== END SALEITEM 14 TARGETED REPAIR DRY RUN ==="
 echo "=== START ACCOUNTING AUDIT ==="
 python manage.py audit_accounting_integrity || true
 echo "=== END ACCOUNTING AUDIT ==="
