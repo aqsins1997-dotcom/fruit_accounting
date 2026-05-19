@@ -157,3 +157,90 @@ def summarize_debt_by_store(rows):
         target["total_debt"] += row["total_debt"]
 
     return sorted(store_rows.values(), key=lambda item: item["store__name"])
+
+
+def repair_client_payment_allocations():
+    from .models import ClientDebtPayment, Credit, CreditPayment
+
+    payments = list(
+        ClientDebtPayment.objects.select_related("store", "client")
+        .filter(status=ClientDebtPayment.STATUS_ACTIVE, allocations__isnull=True)
+        .order_by("paid_at", "id")
+        .distinct()
+    )
+
+    report = {
+        "found_count": len(payments),
+        "clients": [],
+        "payments": [],
+        "unallocated": [],
+        "total_allocated": ZERO,
+    }
+
+    if not payments:
+        return report
+
+    seen_clients = set()
+    for payment in payments:
+        client_key = (payment.store_id, payment.client_id)
+        if client_key not in seen_clients:
+            seen_clients.add(client_key)
+            report["clients"].append(
+                {
+                    "store_id": payment.store_id,
+                    "store_name": payment.store.name,
+                    "client_id": payment.client_id,
+                    "client_name": payment.client.name,
+                }
+            )
+
+        remaining_to_allocate = payment.amount or ZERO
+        created_allocations = []
+        credits = (
+            Credit.objects.select_for_update()
+            .filter(
+                store_id=payment.store_id,
+                customer_id=payment.client_id,
+                sale__deleted_at__isnull=True,
+            )
+            .exclude(status=Credit.STATUS_PAID)
+            .order_by("sale__date", "id")
+        )
+
+        for credit in credits:
+            if remaining_to_allocate <= ZERO:
+                break
+
+            available_amount = credit.remaining_amount or ZERO
+            if available_amount <= ZERO:
+                continue
+
+            allocated_amount = min(available_amount, remaining_to_allocate)
+            allocation = CreditPayment.objects.create(
+                credit=credit,
+                client_debt_payment=payment,
+                date=payment.paid_at,
+                amount=allocated_amount,
+                comment=payment.comment,
+            )
+            created_allocations.append(allocation)
+            remaining_to_allocate -= allocated_amount
+
+        allocated_total = (payment.amount or ZERO) - remaining_to_allocate
+        report["total_allocated"] += allocated_total
+
+        payment_result = {
+            "payment_id": payment.id,
+            "store_name": payment.store.name,
+            "client_name": payment.client.name,
+            "payment_amount": payment.amount or ZERO,
+            "allocated_amount": allocated_total,
+            "leftover_amount": remaining_to_allocate,
+            "allocation_count": len(created_allocations),
+        }
+        report["payments"].append(payment_result)
+
+        if remaining_to_allocate > ZERO:
+            report["unallocated"].append(payment_result)
+
+    return report

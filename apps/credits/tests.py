@@ -1,7 +1,9 @@
 import json
+from io import StringIO
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -10,6 +12,7 @@ from apps.inventory.models import Purchase, PurchaseItem
 from apps.sales.models import CashRegister, Sale, SaleItem
 
 from .models import ClientDebtPayment, CreditPayment
+from .services import build_debtor_rows
 
 
 class CreditNoAdminViewsTests(TestCase):
@@ -248,3 +251,33 @@ class CreditNoAdminViewsTests(TestCase):
         history_response = self.client.get(reverse("credits:api_client_payment_history"))
         self.assertEqual(history_response.status_code, 200)
         self.assertEqual(history_response.json()["results"][0]["comment"], "API")
+
+    def test_repair_client_payment_allocations_restores_missing_distribution(self):
+        payment = ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("60.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-04-19",
+            employee=self.user,
+            comment="Broken legacy payment",
+        )
+        for allocation in list(payment.allocations.all()):
+            allocation.delete()
+        self.credit.refresh_from_db()
+        self.assertEqual(payment.allocations.count(), 0)
+        self.assertEqual(self.credit.remaining_amount, Decimal("60.00"))
+        self.assertEqual(len(build_debtor_rows()), 1)
+
+        stdout = StringIO()
+        call_command("repair_client_payment_allocations", stdout=stdout)
+
+        payment.refresh_from_db()
+        self.credit.refresh_from_db()
+        self.assertEqual(payment.allocations.count(), 1)
+        self.assertEqual(payment.allocations.get().amount, Decimal("60.00"))
+        self.assertEqual(self.credit.remaining_amount, Decimal("0.00"))
+        self.assertEqual(self.credit.status, self.credit.STATUS_PAID)
+        self.assertEqual(build_debtor_rows(), [])
+        self.assertEqual(self.client.get(reverse("reports:debtors_report")).context["debtor_rows"], [])
+        self.assertIn("Found payments without allocations: 1", stdout.getvalue())

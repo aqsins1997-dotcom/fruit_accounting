@@ -1,7 +1,9 @@
 from decimal import Decimal
+from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -610,3 +612,34 @@ class SupplierBalancesViewTests(TestCase):
         response = self.client.get(reverse("payables:supplier_payment_list"), HTTP_HOST="localhost")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.supplier.name)
+
+    def test_repair_supplier_payment_allocations_restores_missing_distribution(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
+        PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("50.00"),
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            date="2026-04-11",
+            amount=Decimal("200.00"),
+        )
+        SupplierPaymentAllocation.objects.filter(payment=payment).delete()
+        self.assertEqual(payment.allocations.count(), 0)
+
+        stdout = StringIO()
+        call_command("repair_supplier_payment_allocations", stdout=stdout)
+
+        payment.refresh_from_db()
+        allocations = list(payment.allocations.values_list("purchase_id", "amount"))
+        self.assertEqual(allocations, [(purchase.id, Decimal("200.00"))])
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["paid_amount"], Decimal("200.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("300.00"))
+        self.assertIn("Found payments without allocations: 1", stdout.getvalue())
