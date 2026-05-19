@@ -4,6 +4,8 @@ set -o errexit
 pip install -r requirements.txt
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
+python manage.py repair_client_payment_allocations
+python manage.py repair_supplier_payment_allocations
 
 python manage.py shell -c "
 import os
