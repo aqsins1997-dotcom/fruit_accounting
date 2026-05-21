@@ -407,6 +407,131 @@ def apply_purchase_item_rebalance_update(*, purchase_item, new_quantity=None, ne
     }
 
 
+def build_supplier_rebalance_case_report(*, purchase_item):
+    from .models import SupplierOverpayment, SupplierPaymentAllocation
+    from apps.sales.services import build_cash_breakdown
+
+    supplier_id = purchase_item.purchase.supplier_id
+    store_id = purchase_item.store_id
+    purchase_id = purchase_item.purchase_id
+    purchase_key = (purchase_id, store_id)
+
+    sold_quantity = _qty(get_purchase_item_sold_quantity(purchase_item))
+    remaining_stock = _qty(purchase_item.quantity_kg - sold_quantity)
+    if remaining_stock < ZERO_QTY:
+        remaining_stock = ZERO_QTY
+
+    purchase_total_amount = _money(
+        sum(
+            (
+                item.quantity_kg * item.purchase_price_per_kg
+                for item in purchase_item.purchase.items.filter(store_id=store_id)
+            ),
+            ZERO,
+        )
+    )
+    line_total_amount = _money(purchase_item.quantity_kg * purchase_item.purchase_price_per_kg)
+
+    simulation = simulate_supplier_settlement(supplier_id=supplier_id, store_id=store_id)
+    paid_amount = simulation["purchase_paid_map"].get(purchase_key, ZERO)
+    remaining_debt = _money(purchase_total_amount - paid_amount)
+    if remaining_debt < ZERO:
+        remaining_debt = ZERO
+
+    if remaining_debt == ZERO:
+        status = "paid"
+    elif paid_amount > ZERO:
+        status = "partial"
+    else:
+        status = "unpaid"
+
+    allocations = list(
+        SupplierPaymentAllocation.objects.select_related("payment", "purchase")
+        .filter(
+            payment__status="active",
+            purchase_id=purchase_id,
+            store_id=store_id,
+        )
+        .order_by("payment__date", "payment_id", "id")
+    )
+    allocation_rows = [
+        {
+            "allocation_id": allocation.id,
+            "payment_id": allocation.payment_id,
+            "payment_date": allocation.payment.date,
+            "payment_method": allocation.payment.payment_method,
+            "payment_amount": _money(allocation.payment.amount),
+            "allocated_amount": _money(allocation.amount),
+        }
+        for allocation in allocations
+    ]
+
+    related_payment_ids = {allocation.payment_id for allocation in allocations}
+    redistributed_rows = []
+    if related_payment_ids:
+        sibling_allocations = (
+            SupplierPaymentAllocation.objects.select_related("payment", "purchase")
+            .filter(payment_id__in=related_payment_ids, payment__status="active")
+            .exclude(purchase_id=purchase_id, store_id=store_id)
+            .order_by("payment__date", "payment_id", "purchase__date", "purchase_id", "id")
+        )
+        for allocation in sibling_allocations:
+            redistributed_rows.append(
+                {
+                    "payment_id": allocation.payment_id,
+                    "purchase_id": allocation.purchase_id,
+                    "purchase_date": allocation.purchase.date,
+                    "allocated_amount": _money(allocation.amount),
+                }
+            )
+
+    supplier_total_paid = simulation["summary"]["total_paid_amount"]
+    supplier_total_purchases = simulation["summary"]["total_purchase_amount"]
+    supplier_total_debt = simulation["summary"]["total_due_amount"]
+    supplier_overpayment = _money(
+        SupplierOverpayment.objects.filter(supplier_id=supplier_id, store_id=store_id).aggregate(
+            total=models.Sum("remaining_amount")
+        )["total"]
+        or ZERO
+    )
+
+    max_allocation_gap = ZERO
+    for row in simulation["purchase_rows"]:
+        gap = _money(row["paid_amount"] - row["purchase_total"])
+        if gap > max_allocation_gap:
+            max_allocation_gap = gap
+
+    return {
+        "purchase_item_id": purchase_item.id,
+        "purchase_id": purchase_id,
+        "supplier_name": purchase_item.purchase.supplier.name,
+        "product_name": purchase_item.product.name,
+        "store_name": purchase_item.store.name,
+        "history_available": False,
+        "old_amount": None,
+        "new_amount": purchase_total_amount,
+        "current_quantity": _qty(purchase_item.quantity_kg),
+        "unit_price": _money(purchase_item.purchase_price_per_kg),
+        "sold_quantity": sold_quantity,
+        "remaining_stock": remaining_stock,
+        "line_total_amount": line_total_amount,
+        "purchase_total_amount": purchase_total_amount,
+        "paid_amount": _money(paid_amount),
+        "remaining_debt": remaining_debt,
+        "status": status,
+        "allocations": allocation_rows,
+        "reallocated_targets": redistributed_rows,
+        "reallocated_total": _money(sum((row["allocated_amount"] for row in redistributed_rows), ZERO)),
+        "supplier_total_purchases": supplier_total_purchases,
+        "supplier_total_paid": supplier_total_paid,
+        "supplier_total_debt": supplier_total_debt,
+        "supplier_overpayment": supplier_overpayment,
+        "has_negative_debt": supplier_total_debt < ZERO or remaining_debt < ZERO,
+        "allocation_excess_over_purchase": max_allocation_gap,
+        "cash_breakdown": build_cash_breakdown(purchase_item.store),
+    }
+
+
 def repair_supplier_payment_allocations():
     from .models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 

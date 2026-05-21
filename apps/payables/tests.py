@@ -664,6 +664,64 @@ class SupplierBalancesViewTests(TestCase):
         self.assertEqual(payment.comment, "Историческая оплата с переплатой")
         self.assertEqual(payment.overpayment.remaining_amount, Decimal("50.00"))
 
+    def test_verify_supplier_rebalance_case_outputs_expected_current_state(self):
+        CashRegister.objects.filter(store__in=[self.store, self.other_store]).update(balance=Decimal("0.00"))
+        purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-05-18")
+        item_one = PurchaseItem.objects.create(
+            purchase=purchase_one,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("679.000"),
+            purchase_price_per_kg=Decimal("400.00"),
+        )
+        purchase_two = Purchase.objects.create(supplier=self.supplier, date="2026-05-19")
+        PurchaseItem.objects.create(
+            purchase=purchase_two,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("400.00"),
+        )
+        self._sell_from_batch(
+            purchase_item=item_one,
+            quantity=Decimal("290.600"),
+            price=Decimal("500.00"),
+            date="2026-05-20",
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase_one,
+            date="2026-05-20",
+            payment_method=SupplierPayment.PAYMENT_METHOD_TRANSFER,
+            amount=Decimal("220900.00"),
+        )
+        apply_purchase_item_rebalance_update(
+            purchase_item=item_one,
+            new_quantity=Decimal("316.000"),
+        )
+
+        stdout = StringIO()
+        call_command(
+            "verify_supplier_rebalance_case",
+            purchase_item_id=item_one.id,
+            stdout=stdout,
+        )
+        output = stdout.getvalue()
+
+        self.assertIn(f"purchase item id: {item_one.id}", output)
+        self.assertIn("current quantity: 316.000", output)
+        self.assertIn("sold quantity: 290.600", output)
+        self.assertIn("remaining stock: 25.400", output)
+        self.assertIn("purchase total amount: 126400.00", output)
+        self.assertIn("paid amount on this purchase: 126400.00", output)
+        self.assertIn("remaining debt: 0.00", output)
+        self.assertIn("status: paid", output)
+        self.assertIn(f"purchase #{purchase_two.id}", output)
+        self.assertIn("94500.00", output)
+        self.assertIn("supplier overpayment: 0.00", output)
+        self.assertIn("cash changed by reallocation: NO", output)
+
     def test_purchase_specific_payment_is_not_double_counted_with_general_payment(self):
         purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
         purchase_two = Purchase.objects.create(supplier=self.supplier, date="2026-04-12")
