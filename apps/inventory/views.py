@@ -14,6 +14,10 @@ from .forms import (
 from .models import Purchase, PurchaseItem
 
 
+def _action_from_request(request):
+    return request.POST.get("action") or "preview"
+
+
 @login_required
 def purchase_create(request):
     if request.method == "POST":
@@ -31,11 +35,11 @@ def purchase_create(request):
         purchase_form = PurchaseCreateForm()
         item_form = PurchaseItemCreateForm()
 
-    context = {
-        "purchase_form": purchase_form,
-        "item_form": item_form,
-    }
-    return render(request, "inventory/purchase_form.html", context)
+    return render(
+        request,
+        "inventory/purchase_form.html",
+        {"purchase_form": purchase_form, "item_form": item_form},
+    )
 
 
 @login_required
@@ -46,11 +50,7 @@ def purchase_list(request):
         .prefetch_related("items__store", "items__product")
         .order_by("-date", "-id")
     )
-    item_ids = [
-        item.id
-        for purchase in purchases
-        for item in purchase.items.all()
-    ]
+    item_ids = [item.id for purchase in purchases for item in purchase.items.all()]
     profitability_map = build_purchase_item_profitability_map(purchase_item_ids=item_ids)
     for purchase in purchases:
         for item in purchase.items.all():
@@ -67,23 +67,23 @@ def purchase_item_price_update(request, pk):
         ),
         pk=pk,
     )
+    preview = None
 
     if request.method == "POST":
         form = PurchaseItemPriceUpdateForm(request.POST, instance=item)
         if form.is_valid():
-            form.save()
-            messages.success(request, "Цена закупки успешно обновлена")
-            return redirect("inventory:purchase_list")
+            preview = form.build_preview()
+            if _action_from_request(request) == "apply":
+                form.save()
+                messages.success(request, "Цена закупки успешно обновлена.")
+                return redirect("inventory:purchase_list")
     else:
         form = PurchaseItemPriceUpdateForm(instance=item)
 
     return render(
         request,
         "inventory/purchase_price_update.html",
-        {
-            "form": form,
-            "item": item,
-        },
+        {"form": form, "item": item, "preview": preview},
     )
 
 
@@ -99,12 +99,15 @@ def purchase_item_quantity_update(request, pk):
             pk=pk,
         )
 
+        preview = None
         if request.method == "POST":
             form = PurchaseItemQuantityUpdateForm(request.POST, instance=item)
             if form.is_valid():
-                form.save()
-                messages.success(request, "Вес закупки успешно обновлен")
-                return redirect("inventory:purchase_list")
+                preview = form.build_preview()
+                if _action_from_request(request) == "apply":
+                    form.save()
+                    messages.success(request, "Вес закупки успешно обновлен.")
+                    return redirect("inventory:purchase_list")
         else:
             form = PurchaseItemQuantityUpdateForm(instance=item)
 
@@ -114,6 +117,7 @@ def purchase_item_quantity_update(request, pk):
         {
             "form": form,
             "item": item,
+            "preview": preview,
             "sold_quantity": form.sold_quantity,
             "current_stock_quantity": form.current_stock_quantity,
             "paid_amount": form.paid_amount,

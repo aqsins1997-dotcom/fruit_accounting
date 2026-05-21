@@ -2,27 +2,30 @@
 
 {% block title %}Долги поставщикам{% endblock %}
 {% block page_title %}Долги поставщикам{% endblock %}
-{% block page_subtitle %}Подробный расчет по закупкам, оплатам и остаткам{% endblock %}
+{% block page_subtitle %}Подробный расчет по закупкам, оплатам, переплатам и остаткам{% endblock %}
 
 {% block content %}
 <section class="grid" style="gap: 24px;">
-    <section class="grid grid--3">
+    <section class="grid grid--4">
         <div class="stat-card">
             <div class="stat-card__label">Закуплено всего</div>
             <div class="stat-card__value">{{ summary.total_purchases|floatformat:2 }}</div>
             <div class="stat-card__meta">Сумма закупок в текущем фильтре</div>
         </div>
-
         <div class="stat-card">
             <div class="stat-card__label">Уже оплачено</div>
             <div class="stat-card__value">{{ summary.total_payments|floatformat:2 }}</div>
-            <div class="stat-card__meta">Сумма оплат в текущем фильтре</div>
+            <div class="stat-card__meta">Распределенные оплаты по закупкам</div>
         </div>
-
         <div class="stat-card">
             <div class="stat-card__label">Общий долг</div>
             <div class="stat-card__value">{{ summary.total_due|floatformat:2 }}</div>
-            <div class="stat-card__meta">Остаток к оплате в текущем фильтре</div>
+            <div class="stat-card__meta">Остаток к оплате</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__label">Переплата / аванс</div>
+            <div class="stat-card__value">{{ summary.total_overpayments|floatformat:2 }}</div>
+            <div class="stat-card__meta">Свободно оплаченные суммы поставщикам</div>
         </div>
     </section>
 
@@ -61,7 +64,7 @@
         <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 18px;">
             <div>
                 <h3 class="card__title">Детализация задолженности</h3>
-                <p class="card__subtitle">Показывает поставщика, закупки, магазины, оплаты и остаток долга.</p>
+                <p class="card__subtitle">Показывает закупки, распределенные оплаты, остаток долга и отдельную переплату.</p>
             </div>
             <div class="quick-actions">
                 <a href="{% url 'payables:supplier_payment_create' %}" class="btn btn--primary">Новая оплата поставщику</a>
@@ -71,74 +74,86 @@
 
         {% if supplier_groups %}
             {% for group in supplier_groups %}
-            <section class="card" style="margin-bottom: 18px;">
-                <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;">
-                    <div>
-                        <h4 class="card__title" style="margin-bottom: 6px;">{{ group.supplier_name }}</h4>
-                        <p class="card__subtitle">
-                            Закуплено {{ group.purchase_total|floatformat:2 }},
-                            оплачено {{ group.paid_amount|floatformat:2 }},
-                            осталось {{ group.remaining_amount|floatformat:2 }}
-                        </p>
+                <section class="card" style="margin-bottom: 18px;">
+                    <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;">
+                        <div>
+                            <h4 class="card__title" style="margin-bottom: 6px;">{{ group.supplier_name }}</h4>
+                            <p class="card__subtitle">
+                                Закуплено {{ group.purchase_total|floatformat:2 }},
+                                оплачено {{ group.paid_amount|floatformat:2 }},
+                                осталось {{ group.remaining_amount|floatformat:2 }}
+                                {% if group.overpayment_amount > 0 %}
+                                    , переплата {{ group.overpayment_amount|floatformat:2 }}
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div>
+                            {% if group.remaining_amount > 0 %}
+                                <span class="badge badge--warning">Долг {{ group.remaining_amount|floatformat:2 }}</span>
+                            {% else %}
+                                <span class="badge badge--success">Все оплачено</span>
+                            {% endif %}
+                            {% if group.overpayment_amount > 0 %}
+                                <span class="badge badge--success">Переплата {{ group.overpayment_amount|floatformat:2 }}</span>
+                            {% endif %}
+                        </div>
                     </div>
-                    <div>
-                        {% if group.remaining_amount > 0 %}
-                            <span class="badge badge--warning">Долг {{ group.remaining_amount|floatformat:2 }}</span>
-                        {% else %}
-                            <span class="badge badge--success">Все оплачено</span>
-                        {% endif %}
-                    </div>
-                </div>
 
-                <div class="table-wrap">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Поставщик</th>
-                                <th>Магазин</th>
-                                <th>Закупка</th>
-                                <th>Дата закупки</th>
-                                <th>Сумма закупки</th>
-                                <th>Оплачено</th>
-                                <th>Осталось</th>
-                                <th>Статус</th>
-                                <th>Действие</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in group.rows %}
-                            <tr>
-                                <td>{{ row.supplier_name|default:"-" }}</td>
-                                <td>{{ row.store_name|default:"-" }}</td>
-                                <td>Закупка №{{ row.purchase_id }}</td>
-                                <td>{{ row.purchase_date|date:"d.m.Y"|default:"-" }}</td>
-                                <td>{{ row.purchase_total|floatformat:2 }}</td>
-                                <td>{{ row.paid_amount|floatformat:2 }}</td>
-                                <td>{{ row.remaining_amount|floatformat:2 }}</td>
-                                <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
-                                <td>
-                                    {% if row.remaining_amount > 0 %}
-                                        <a href="{{ row.payment_url }}" class="btn">Оплатить</a>
-                                    {% else %}
-                                        <span class="badge badge--success">Закрыто</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <th colspan="4">Итого по поставщику</th>
-                                <th>{{ group.purchase_total|floatformat:2 }}</th>
-                                <th>{{ group.paid_amount|floatformat:2 }}</th>
-                                <th>{{ group.remaining_amount|floatformat:2 }}</th>
-                                <th></th>
-                                <th></th>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </section>
+                    {% if group.rows %}
+                        <div class="table-wrap">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Поставщик</th>
+                                        <th>Магазин</th>
+                                        <th>Закупка</th>
+                                        <th>Дата закупки</th>
+                                        <th>Сумма закупки</th>
+                                        <th>Оплачено</th>
+                                        <th>Осталось</th>
+                                        <th>Статус</th>
+                                        <th>Действие</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in group.rows %}
+                                        <tr>
+                                            <td>{{ row.supplier_name|default:"-" }}</td>
+                                            <td>{{ row.store_name|default:"-" }}</td>
+                                            <td>Закупка №{{ row.purchase_id }}</td>
+                                            <td>{{ row.purchase_date|date:"d.m.Y"|default:"-" }}</td>
+                                            <td>{{ row.purchase_total|floatformat:2 }}</td>
+                                            <td>{{ row.paid_amount|floatformat:2 }}</td>
+                                            <td>{{ row.remaining_amount|floatformat:2 }}</td>
+                                            <td><span class="badge {{ row.status_class }}">{{ row.status }}</span></td>
+                                            <td>
+                                                {% if row.remaining_amount > 0 %}
+                                                    <a href="{{ row.payment_url }}" class="btn">Оплатить</a>
+                                                {% else %}
+                                                    <span class="badge badge--success">Закрыто</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <th colspan="4">Итого по поставщику</th>
+                                        <th>{{ group.purchase_total|floatformat:2 }}</th>
+                                        <th>{{ group.paid_amount|floatformat:2 }}</th>
+                                        <th>{{ group.remaining_amount|floatformat:2 }}</th>
+                                        <th></th>
+                                        <th></th>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="message success">
+                            Открытых закупок в фильтре нет. {% if group.overpayment_amount > 0 %}Есть переплата поставщику {{ group.overpayment_amount|floatformat:2 }}.{% endif %}
+                        </div>
+                    {% endif %}
+                </section>
             {% endfor %}
         {% else %}
             <div class="empty-state">

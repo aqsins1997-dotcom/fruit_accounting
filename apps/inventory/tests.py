@@ -6,7 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
-from apps.payables.models import SupplierPayment, SupplierPaymentAllocation
+from apps.payables.models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 from apps.reports.services import build_purchase_item_profitability_map
 from apps.sales.models import CashRegister, Sale, SaleItem, SaleItemBatch
 
@@ -173,7 +173,7 @@ class InventoryNoAdminViewsTests(TestCase):
 
         response = self.client.post(
             reverse("inventory:purchase_item_price_update", args=[item.id]),
-            {"purchase_price_per_kg": "300.00"},
+            {"purchase_price_per_kg": "300.00", "action": "apply"},
             follow=True,
         )
 
@@ -217,7 +217,10 @@ class InventoryNoAdminViewsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Новая цена закупки не может быть отрицательной.")
+        self.assertIn(
+            "Новая закупочная цена не может быть отрицательной.",
+            response.context["form"].errors["purchase_price_per_kg"],
+        )
         item.refresh_from_db()
         self.assertEqual(item.purchase_price_per_kg, Decimal("330.00"))
 
@@ -261,7 +264,7 @@ class InventoryNoAdminViewsTests(TestCase):
 
         response = self.client.post(
             reverse("inventory:purchase_item_quantity_update", args=[item.id]),
-            {"quantity_kg": "400.000"},
+            {"quantity_kg": "400.000", "action": "apply"},
             follow=True,
         )
 
@@ -278,7 +281,7 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertEqual(group["remaining_amount"], Decimal("3000.00"))
         self.assertEqual(SupplierPaymentAllocation.objects.get(purchase=purchase).amount, Decimal("1000.00"))
 
-    def test_purchase_item_quantity_update_rejects_total_below_paid_amount(self):
+    def test_purchase_item_quantity_update_creates_supplier_overpayment_when_total_drops_below_paid_amount(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
         item = PurchaseItem.objects.create(
             purchase=purchase,
@@ -298,13 +301,23 @@ class InventoryNoAdminViewsTests(TestCase):
 
         response = self.client.post(
             reverse("inventory:purchase_item_quantity_update", args=[item.id]),
-            {"quantity_kg": "300.000"},
+            {"quantity_kg": "300.000", "action": "apply"},
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Оплачено: 4000.00")
+        self.assertContains(response, "успешно обновлен")
         item.refresh_from_db()
-        self.assertEqual(item.quantity_kg, Decimal("500.000"))
+        self.assertEqual(item.quantity_kg, Decimal("300.000"))
+        allocation = SupplierPaymentAllocation.objects.get(purchase=purchase)
+        self.assertEqual(allocation.amount, Decimal("3000.00"))
+        overpayment = SupplierOverpayment.objects.get(source_payment__purchase=purchase)
+        self.assertEqual(overpayment.amount, Decimal("1000.00"))
+        self.assertEqual(overpayment.remaining_amount, Decimal("1000.00"))
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["remaining_amount"], Decimal("0.00"))
+        self.assertEqual(group["overpayment_amount"], Decimal("1000.00"))
 
     def test_purchase_delete_is_soft_and_keeps_sales_history(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")

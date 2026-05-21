@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import SupplierPayment, SupplierPaymentAllocation
+from .models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 
 
 class SupplierPaymentAllocationInline(admin.TabularInline):
@@ -48,3 +48,10 @@ class SupplierPaymentAllocationAdmin(admin.ModelAdmin):
     list_display = ("id", "payment", "purchase", "store", "amount", "created_at")
     list_filter = ("store", "purchase", "created_at")
     search_fields = ("payment__supplier__name", "purchase__id", "store__name")
+
+
+@admin.register(SupplierOverpayment)
+class SupplierOverpaymentAdmin(admin.ModelAdmin):
+    list_display = ("id", "store", "supplier", "source_payment", "amount", "remaining_amount", "created_at")
+    list_filter = ("store", "supplier", "created_at")
+    search_fields = ("supplier__name", "store__name", "source_payment__id", "comment")

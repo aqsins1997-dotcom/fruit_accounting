@@ -5,7 +5,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.core.models import Product, Store, Supplier
-from apps.payables.models import SupplierPaymentAllocation
+from apps.payables.services import apply_purchase_item_rebalance_update, build_purchase_item_rebalance_preview
 from apps.sales.models import SaleItemBatch
 
 from .models import Purchase, PurchaseItem
@@ -43,23 +43,36 @@ class PurchaseItemPriceUpdateForm(forms.ModelForm):
         model = PurchaseItem
         fields = ("purchase_price_per_kg",)
         labels = {
-            "purchase_price_per_kg": "Новая цена закупки",
+            "purchase_price_per_kg": "Новая закупочная цена",
         }
         widgets = {
             "purchase_price_per_kg": forms.NumberInput(
-                attrs={
-                    "min": "0",
-                    "step": "0.01",
-                    "inputmode": "decimal",
-                }
+                attrs={"min": "0", "step": "0.01", "inputmode": "decimal"}
             ),
         }
 
     def clean_purchase_price_per_kg(self):
         price = self.cleaned_data["purchase_price_per_kg"]
         if price < 0:
-            raise forms.ValidationError("Новая цена закупки не может быть отрицательной.")
+            raise forms.ValidationError("Новая закупочная цена не может быть отрицательной.")
         return price
+
+    def build_preview(self):
+        if not self.is_bound or not hasattr(self, "cleaned_data"):
+            return None
+        new_price = self.cleaned_data.get("purchase_price_per_kg")
+        if new_price is None:
+            return None
+        return build_purchase_item_rebalance_preview(
+            purchase_item=self.instance,
+            new_unit_price=new_price,
+        )
+
+    def save(self, commit=True):
+        return apply_purchase_item_rebalance_update(
+            purchase_item=self.instance,
+            new_unit_price=self.cleaned_data["purchase_price_per_kg"],
+        )
 
 
 class PurchaseItemQuantityUpdateForm(forms.ModelForm):
@@ -71,11 +84,7 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
         }
         widgets = {
             "quantity_kg": forms.NumberInput(
-                attrs={
-                    "min": "0.001",
-                    "step": "0.001",
-                    "inputmode": "decimal",
-                }
+                attrs={"min": "0.001", "step": "0.001", "inputmode": "decimal"}
             ),
         }
 
@@ -95,20 +104,11 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
     @property
     def current_stock_quantity(self):
         stock = self.instance.quantity_kg - self.sold_quantity
-        return stock if stock > 0 else 0
+        return stock if stock > 0 else Decimal("0.000")
 
     @property
     def paid_amount(self):
-        if not self.instance.pk:
-            return Decimal("0.00")
-        return (
-            SupplierPaymentAllocation.objects.filter(
-                purchase=self.instance.purchase,
-                store=self.instance.store,
-                payment__status="active",
-            ).aggregate(total=Sum("amount"))["total"]
-            or Decimal("0.00")
-        )
+        return build_purchase_item_rebalance_preview(purchase_item=self.instance)["old_allocated_payment"]
 
     def purchase_total_for_store(self, quantity):
         total = quantity * self.instance.purchase_price_per_kg
@@ -139,12 +139,21 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
                 f"Нельзя сделать вес меньше уже проданного по этой партии. Минимум: {minimum_quantity} кг."
             )
 
-        new_total = self.purchase_total_for_store(quantity)
-        paid_amount = self.paid_amount
-        if new_total < paid_amount:
-            paid_display = paid_amount.quantize(Decimal("0.01"))
-            raise forms.ValidationError(
-                f"Нельзя сделать сумму закупки меньше уже оплаченной суммы. Оплачено: {paid_display}."
-            )
-
         return quantity
+
+    def build_preview(self):
+        if not self.is_bound or not hasattr(self, "cleaned_data"):
+            return None
+        new_quantity = self.cleaned_data.get("quantity_kg")
+        if new_quantity is None:
+            return None
+        return build_purchase_item_rebalance_preview(
+            purchase_item=self.instance,
+            new_quantity=new_quantity,
+        )
+
+    def save(self, commit=True):
+        return apply_purchase_item_rebalance_update(
+            purchase_item=self.instance,
+            new_quantity=self.cleaned_data["quantity_kg"],
+        )

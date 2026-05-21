@@ -2,12 +2,10 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
-from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.core.models import Store, Supplier
-from apps.inventory.models import Purchase, PurchaseItem
+from apps.inventory.models import Purchase
 
 
 class TimeStampedModel(models.Model):
@@ -22,146 +20,22 @@ def rebuild_supplier_payment_allocations(*, supplier_id, store_id):
     if not supplier_id or not store_id:
         return
 
-    money_field = DecimalField(max_digits=14, decimal_places=2)
-    line_total = ExpressionWrapper(
-        F("quantity_kg") * F("purchase_price_per_kg"),
-        output_field=money_field,
-    )
+    from .services import rebuild_supplier_settlement_state
 
-    purchase_rows = list(
-        PurchaseItem.objects.filter(
-            purchase__supplier_id=supplier_id,
-            purchase__deleted_at__isnull=True,
-            store_id=store_id,
-        )
-        .annotate(line_total=line_total)
-        .values("purchase_id", "purchase__date")
-        .annotate(
-            purchase_total=Coalesce(
-                Sum("line_total"),
-                Value(Decimal("0.00"), output_field=money_field),
-            )
-        )
-        .order_by("purchase__date", "purchase_id")
-    )
-
-    purchases = [
-        {
-            "purchase_id": row["purchase_id"],
-            "remaining_amount": row["purchase_total"] or Decimal("0.00"),
-        }
-        for row in purchase_rows
-    ]
-    purchases_by_id = {row["purchase_id"]: row for row in purchases}
-
-    payments = list(
-        SupplierPayment.objects.filter(
-            supplier_id=supplier_id,
-            store_id=store_id,
-            status=SupplierPayment.STATUS_ACTIVE,
-        ).order_by("date", "id")
-    )
-
-    SupplierPaymentAllocation.objects.filter(
-        payment__supplier_id=supplier_id,
-        payment__store_id=store_id,
-        payment__status=SupplierPayment.STATUS_ACTIVE,
-    ).delete()
-
-    allocations_to_create = []
-    for payment in payments:
-        remaining_payment = payment.amount or Decimal("0.00")
-        if remaining_payment <= 0:
-            continue
-
-        if payment.purchase_id:
-            bound_purchase = purchases_by_id.get(payment.purchase_id)
-            if bound_purchase and bound_purchase["remaining_amount"] > 0:
-                applied = min(bound_purchase["remaining_amount"], remaining_payment)
-                if applied > 0:
-                    allocations_to_create.append(
-                        SupplierPaymentAllocation(
-                            payment=payment,
-                            purchase_id=payment.purchase_id,
-                            store_id=store_id,
-                            amount=applied,
-                        )
-                    )
-                    bound_purchase["remaining_amount"] -= applied
-                    remaining_payment -= applied
-
-        if remaining_payment > 0:
-            for purchase in purchases:
-                if remaining_payment <= 0:
-                    break
-                if purchase["remaining_amount"] <= 0:
-                    continue
-
-                applied = min(purchase["remaining_amount"], remaining_payment)
-                if applied <= 0:
-                    continue
-
-                allocations_to_create.append(
-                    SupplierPaymentAllocation(
-                        payment=payment,
-                        purchase_id=purchase["purchase_id"],
-                        store_id=store_id,
-                        amount=applied,
-                    )
-                )
-                purchase["remaining_amount"] -= applied
-                remaining_payment -= applied
-
-    if allocations_to_create:
-        SupplierPaymentAllocation.objects.bulk_create(allocations_to_create)
+    rebuild_supplier_settlement_state(supplier_id=supplier_id, store_id=store_id)
 
 
 def get_supplier_remaining_debt(*, supplier_id, store_id, exclude_payment_id=None):
     if not supplier_id or not store_id:
         return Decimal("0.00")
 
-    money_field = DecimalField(max_digits=14, decimal_places=2)
-    line_total = ExpressionWrapper(
-        F("quantity_kg") * F("purchase_price_per_kg"),
-        output_field=money_field,
-    )
-    purchase_total = (
-        PurchaseItem.objects.filter(
-            purchase__supplier_id=supplier_id,
-            purchase__deleted_at__isnull=True,
-            store_id=store_id,
-        )
-        .annotate(line_total=line_total)
-        .aggregate(
-            total=Coalesce(
-                Sum("line_total"),
-                Value(Decimal("0.00"), output_field=money_field),
-            )
-        )["total"]
-        or Decimal("0.00")
-    )
+    from .services import calculate_supplier_remaining_debt
 
-    allocations = SupplierPaymentAllocation.objects.filter(
-        payment__supplier_id=supplier_id,
-        payment__store_id=store_id,
-        payment__status=SupplierPayment.STATUS_ACTIVE,
-        purchase__deleted_at__isnull=True,
+    return calculate_supplier_remaining_debt(
+        supplier_id=supplier_id,
         store_id=store_id,
+        exclude_payment_id=exclude_payment_id,
     )
-    if exclude_payment_id:
-        allocations = allocations.exclude(payment_id=exclude_payment_id)
-
-    paid_total = allocations.aggregate(
-        total=Coalesce(
-            Sum("amount"),
-            Value(Decimal("0.00"), output_field=money_field),
-        )
-    )["total"] or Decimal("0.00")
-
-    remaining = purchase_total - paid_total
-    if remaining < Decimal("0.00"):
-        return Decimal("0.00")
-    return remaining.quantize(Decimal("0.01"))
 
 
 class SupplierPayment(TimeStampedModel):
@@ -215,25 +89,15 @@ class SupplierPayment(TimeStampedModel):
         default=PAYMENT_METHOD_CASH,
         verbose_name="Способ оплаты",
     )
-    comment = models.TextField(
-        blank=True,
-        verbose_name="Комментарий",
-    )
+    comment = models.TextField(blank=True, verbose_name="Комментарий")
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
         default=STATUS_ACTIVE,
         verbose_name="Статус",
     )
-    cancelled_at = models.DateTimeField(
-        blank=True,
-        null=True,
-        verbose_name="Дата отмены",
-    )
-    cancel_reason = models.TextField(
-        blank=True,
-        verbose_name="Причина отмены",
-    )
+    cancelled_at = models.DateTimeField(blank=True, null=True, verbose_name="Дата отмены")
+    cancel_reason = models.TextField(blank=True, verbose_name="Причина отмены")
 
     class Meta:
         verbose_name = "Оплата поставщику"
@@ -261,16 +125,23 @@ class SupplierPayment(TimeStampedModel):
             raise ValidationError({"amount": "Сумма оплаты должна быть больше 0."})
 
         if self.status == self.STATUS_ACTIVE:
+            current_amount = Decimal("0.00")
+            if self.pk:
+                current_amount = (
+                    SupplierPayment.objects.filter(pk=self.pk).values_list("amount", flat=True).first()
+                    or Decimal("0.00")
+                )
             remaining_debt = get_supplier_remaining_debt(
                 supplier_id=self.supplier_id,
                 store_id=self.store_id,
                 exclude_payment_id=self.pk,
             )
-            if self.amount and self.amount > remaining_debt:
+            allowed_amount = remaining_debt if current_amount <= remaining_debt else current_amount
+            if self.amount and self.amount > allowed_amount:
                 raise ValidationError(
                     {
                         "amount": (
-                            "Сумма оплаты не может быть больше текущего долга поставщика. "
+                            "Сумма оплаты не может быть больше текущего долга поставщику. "
                             f"Текущий долг: {remaining_debt}."
                         )
                     }
@@ -282,11 +153,9 @@ class SupplierPayment(TimeStampedModel):
                 errors["purchase"] = "Нельзя привязать оплату к удаленной закупке."
             if self.purchase.supplier_id != self.supplier_id:
                 errors["purchase"] = "Закупка должна относиться к выбранному поставщику."
-
             purchase_has_store = self.purchase.items.filter(store_id=self.store_id).exists()
             if not purchase_has_store:
                 errors["store"] = "У выбранной закупки нет позиций для этого магазина."
-
             if errors:
                 raise ValidationError(errors)
 
@@ -404,3 +273,48 @@ class SupplierPaymentAllocation(TimeStampedModel):
 
     def __str__(self):
         return f"Оплата #{self.payment_id} -> закупка #{self.purchase_id} | {self.amount}"
+
+
+class SupplierOverpayment(TimeStampedModel):
+    supplier = models.ForeignKey(
+        Supplier,
+        on_delete=models.PROTECT,
+        related_name="overpayments",
+        verbose_name="Поставщик",
+    )
+    store = models.ForeignKey(
+        Store,
+        on_delete=models.PROTECT,
+        related_name="supplier_overpayments",
+        verbose_name="Магазин",
+    )
+    source_payment = models.OneToOneField(
+        SupplierPayment,
+        on_delete=models.CASCADE,
+        related_name="overpayment",
+        verbose_name="Исходная оплата",
+        null=True,
+        blank=True,
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name="Сумма переплаты",
+    )
+    remaining_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name="Остаток переплаты",
+    )
+    comment = models.TextField(blank=True, verbose_name="Комментарий")
+
+    class Meta:
+        verbose_name = "Переплата поставщику"
+        verbose_name_plural = "Переплаты поставщикам"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["supplier", "store", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.store} | {self.supplier} | переплата {self.remaining_amount}"

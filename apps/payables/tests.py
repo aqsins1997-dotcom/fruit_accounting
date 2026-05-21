@@ -9,9 +9,10 @@ from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
 from apps.inventory.models import Purchase, PurchaseItem
-from apps.sales.models import CashRegister
+from apps.payables.services import apply_purchase_item_rebalance_update, build_purchase_item_rebalance_preview
+from apps.sales.models import CashRegister, Sale, SaleItem, SaleItemBatch
 
-from .models import SupplierPayment, SupplierPaymentAllocation
+from .models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 
 
 class SupplierBalancesViewTests(TestCase):
@@ -30,6 +31,22 @@ class SupplierBalancesViewTests(TestCase):
         self.product = Product.objects.create(name="Товар 1")
         CashRegister.objects.create(store=self.store, balance=Decimal("5000.00"))
         CashRegister.objects.create(store=self.other_store, balance=Decimal("5000.00"))
+
+    def _sell_from_batch(self, *, purchase_item, quantity, price, date="2026-04-15", payment_type=Sale.PAYMENT_TYPE_CASH):
+        sale = Sale.objects.create(
+            store=purchase_item.store,
+            date=date,
+            payment_type=payment_type,
+        )
+        sale_item = SaleItem(
+            sale=sale,
+            product=purchase_item.product,
+            quantity_kg=quantity,
+            sale_price_per_kg=price,
+        )
+        sale_item._selected_purchase_item = purchase_item
+        sale_item.save()
+        return sale_item
 
     def test_supplier_balances_renders_and_allocates_general_payment_fifo(self):
         purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
@@ -449,6 +466,8 @@ class SupplierBalancesViewTests(TestCase):
 
         allocation = SupplierPaymentAllocation.objects.get(payment=payment)
         self.assertEqual(allocation.amount, Decimal("100.00"))
+        overpayment = SupplierOverpayment.objects.get(source_payment=payment)
+        self.assertEqual(overpayment.remaining_amount, Decimal("50.00"))
 
     def test_allocations_rebuild_when_purchase_item_price_changes(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")
@@ -472,6 +491,178 @@ class SupplierBalancesViewTests(TestCase):
 
         allocation = SupplierPaymentAllocation.objects.get(payment=payment)
         self.assertEqual(allocation.amount, Decimal("100.00"))
+        overpayment = SupplierOverpayment.objects.get(source_payment=payment)
+        self.assertEqual(overpayment.remaining_amount, Decimal("50.00"))
+
+    def test_quantity_reduction_redistributes_excess_to_other_purchase_without_cash_change(self):
+        CashRegister.objects.filter(store__in=[self.store, self.other_store]).update(balance=Decimal("0.00"))
+        purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-05-18")
+        item_one = PurchaseItem.objects.create(
+            purchase=purchase_one,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("679.000"),
+            purchase_price_per_kg=Decimal("400.00"),
+        )
+        purchase_two = Purchase.objects.create(supplier=self.supplier, date="2026-05-19")
+        PurchaseItem.objects.create(
+            purchase=purchase_two,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("400.00"),
+        )
+        sold_item = self._sell_from_batch(
+            purchase_item=item_one,
+            quantity=Decimal("290.600"),
+            price=Decimal("500.00"),
+            date="2026-05-20",
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase_one,
+            date="2026-05-20",
+            payment_method=SupplierPayment.PAYMENT_METHOD_TRANSFER,
+            amount=Decimal("220900.00"),
+        )
+        cash_after_payment = CashRegister.objects.get(store=self.store).balance
+
+        preview = build_purchase_item_rebalance_preview(
+            purchase_item=item_one,
+            new_quantity=Decimal("316.000"),
+        )
+        self.assertEqual(preview["old_purchase_amount"], Decimal("271600.00"))
+        self.assertEqual(preview["new_purchase_amount"], Decimal("126400.00"))
+        self.assertEqual(preview["old_allocated_payment"], Decimal("220900.00"))
+        self.assertEqual(preview["new_allocated_payment"], Decimal("126400.00"))
+        self.assertEqual(preview["excess_payment"], Decimal("94500.00"))
+        self.assertEqual(preview["remaining_stock"], Decimal("25.400"))
+        self.assertEqual(preview["cash_change"], "NO")
+        self.assertEqual(len(preview["redistributions"]), 1)
+        self.assertEqual(preview["redistributions"][0]["purchase_id"], purchase_two.id)
+        self.assertEqual(preview["redistributions"][0]["applied_amount"], Decimal("94500.00"))
+
+        apply_purchase_item_rebalance_update(
+            purchase_item=item_one,
+            new_quantity=Decimal("316.000"),
+        )
+
+        item_one.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(item_one.quantity_kg, Decimal("316.000"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, cash_after_payment)
+        self.assertEqual(
+            SaleItemBatch.objects.get(sale_item=sold_item, purchase_item=item_one).quantity,
+            Decimal("290.600"),
+        )
+        allocations = list(
+            SupplierPaymentAllocation.objects.filter(payment=payment)
+            .order_by("purchase__date", "purchase_id")
+            .values_list("purchase_id", "amount")
+        )
+        self.assertEqual(
+            allocations,
+            [
+                (purchase_one.id, Decimal("126400.00")),
+                (purchase_two.id, Decimal("94500.00")),
+            ],
+        )
+        self.assertFalse(SupplierOverpayment.objects.filter(source_payment=payment).exists())
+
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["remaining_amount"], Decimal("105500.00"))
+        self.assertEqual(group["overpayment_amount"], Decimal("0.00"))
+        first_row, second_row = group["rows"]
+        self.assertEqual(first_row["purchase_id"], purchase_one.id)
+        self.assertEqual(first_row["paid_amount"], Decimal("126400.00"))
+        self.assertEqual(first_row["remaining_amount"], Decimal("0.00"))
+        self.assertEqual(second_row["purchase_id"], purchase_two.id)
+        self.assertEqual(second_row["paid_amount"], Decimal("94500.00"))
+        self.assertEqual(second_row["remaining_amount"], Decimal("105500.00"))
+
+        stdout = StringIO()
+        call_command("audit_accounting_integrity", stdout=stdout)
+        self.assertIn("CRITICAL: 0", stdout.getvalue())
+
+    def test_quantity_increase_only_increases_debt_without_reallocating_payments(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-18")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-05-19",
+            amount=Decimal("60.00"),
+        )
+
+        preview = build_purchase_item_rebalance_preview(
+            purchase_item=item,
+            new_quantity=Decimal("15.000"),
+        )
+        self.assertEqual(preview["old_purchase_amount"], Decimal("100.00"))
+        self.assertEqual(preview["new_purchase_amount"], Decimal("150.00"))
+        self.assertEqual(preview["old_allocated_payment"], Decimal("60.00"))
+        self.assertEqual(preview["new_allocated_payment"], Decimal("60.00"))
+        self.assertEqual(preview["excess_payment"], Decimal("0.00"))
+        self.assertEqual(preview["overpayment_created"], Decimal("0.00"))
+
+        apply_purchase_item_rebalance_update(
+            purchase_item=item,
+            new_quantity=Decimal("15.000"),
+        )
+
+        allocation = SupplierPaymentAllocation.objects.get(payment=payment)
+        self.assertEqual(allocation.amount, Decimal("60.00"))
+        self.assertFalse(SupplierOverpayment.objects.filter(source_payment=payment).exists())
+        response = self.client.get(reverse("payables:supplier_balances"), HTTP_HOST="localhost")
+        group = response.context["supplier_groups"][0]
+        self.assertEqual(group["purchase_total"], Decimal("150.00"))
+        self.assertEqual(group["paid_amount"], Decimal("60.00"))
+        self.assertEqual(group["remaining_amount"], Decimal("90.00"))
+
+    def test_existing_overpayment_does_not_block_active_payment_comment_update(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-18")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("20.00"),
+        )
+        payment = SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            purchase=purchase,
+            date="2026-05-19",
+            amount=Decimal("150.00"),
+        )
+        item.quantity_kg = Decimal("5.000")
+        item.save()
+
+        response = self.client.post(
+            reverse("payables:supplier_payment_update", args=[payment.id]),
+            {
+                "date": "2026-05-19",
+                "payment_method": SupplierPayment.PAYMENT_METHOD_CASH,
+                "amount": "150.00",
+                "comment": "Историческая оплата с переплатой",
+            },
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.comment, "Историческая оплата с переплатой")
+        self.assertEqual(payment.overpayment.remaining_amount, Decimal("50.00"))
 
     def test_purchase_specific_payment_is_not_double_counted_with_general_payment(self):
         purchase_one = Purchase.objects.create(supplier=self.supplier, date="2026-04-10")

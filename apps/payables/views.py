@@ -15,7 +15,7 @@ from django.views.decorators.http import require_POST
 from apps.inventory.models import PurchaseItem
 
 from .forms import SupplierBalanceFilterForm, SupplierPaymentCreateForm, SupplierPaymentUpdateForm
-from .models import SupplierPayment, SupplierPaymentAllocation
+from .models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 
 
 def _attach_validation_error(form, exc):
@@ -281,6 +281,16 @@ def supplier_balances(request):
                     target_row["remaining_amount"] -= applied
                     remaining_payment -= applied
 
+    overpayment_totals = {
+        (row["supplier_id"], row["store_id"]): row["total"] or Decimal("0.00")
+        for row in SupplierOverpayment.objects.values("supplier_id", "store_id").annotate(
+            total=Coalesce(
+                Sum("remaining_amount"),
+                Value(Decimal("0.00"), output_field=money_field),
+            )
+        )
+    }
+
     filtered_rows = []
     for row in rows:
         if row["remaining_amount"] <= 0:
@@ -306,6 +316,7 @@ def supplier_balances(request):
     total_purchases = Decimal("0.00")
     total_payments = Decimal("0.00")
     total_due = Decimal("0.00")
+    total_overpayments = Decimal("0.00")
 
     for row in filtered_rows:
         total_purchases += row["purchase_total"]
@@ -320,6 +331,8 @@ def supplier_balances(request):
                 "purchase_total": Decimal("0.00"),
                 "paid_amount": Decimal("0.00"),
                 "remaining_amount": Decimal("0.00"),
+                "overpayment_amount": Decimal("0.00"),
+                "overpayment_keys": set(),
                 "rows": [],
             },
         )
@@ -327,6 +340,31 @@ def supplier_balances(request):
         supplier_group["paid_amount"] += row["paid_amount"]
         supplier_group["remaining_amount"] += row["remaining_amount"]
         supplier_group["rows"].append(row)
+        overpayment_key = (row["supplier_id"], row["store_id"])
+        if overpayment_key not in supplier_group["overpayment_keys"]:
+            supplier_group["overpayment_keys"].add(overpayment_key)
+            supplier_group["overpayment_amount"] += overpayment_totals.get(overpayment_key, Decimal("0.00"))
+
+    supplier_names = {
+        row["supplier_id"]: row["supplier_name"]
+        for row in rows
+    }
+    for (supplier_id, store_id), amount in overpayment_totals.items():
+        if supplier_id not in supplier_groups_map:
+            supplier_groups_map[supplier_id] = {
+                "supplier_id": supplier_id,
+                "supplier_name": supplier_names.get(supplier_id, f"Поставщик #{supplier_id}"),
+                "purchase_total": Decimal("0.00"),
+                "paid_amount": Decimal("0.00"),
+                "remaining_amount": Decimal("0.00"),
+                "overpayment_amount": amount,
+                "overpayment_keys": {(supplier_id, store_id)},
+                "rows": [],
+            }
+
+    for group in supplier_groups_map.values():
+        total_overpayments += group["overpayment_amount"]
+        group.pop("overpayment_keys", None)
 
     supplier_groups = sorted(
         supplier_groups_map.values(),
@@ -340,6 +378,7 @@ def supplier_balances(request):
             "total_purchases": total_purchases,
             "total_payments": total_payments,
             "total_due": total_due,
+            "total_overpayments": total_overpayments,
         },
     }
     return render(request, "payables/supplier_balances.html", context)

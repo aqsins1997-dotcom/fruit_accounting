@@ -10,7 +10,7 @@ from apps.credits.models import ClientDebtPayment, Credit, CreditPayment
 from apps.credits.services import build_debtor_rows
 from apps.expenses.models import EmployeeAdvance, Expense, SalaryPayment, StoreExpense
 from apps.inventory.models import PurchaseItem, StoreStock, calculate_active_stock_quantity
-from apps.payables.models import SupplierPayment, SupplierPaymentAllocation
+from apps.payables.models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
 from apps.reports.services import build_product_profitability_rows
 from apps.sales.models import Sale, SaleItem, SaleItemBatch
 from apps.sales.services import build_cash_breakdown
@@ -295,34 +295,39 @@ def _audit_suppliers():
         allocation_total = _money(
             payment.allocations.aggregate(total=Coalesce(Sum("amount"), Value(ZERO_MONEY)))["total"]
         )
-        if not payment.allocations.exists():
+        try:
+            overpayment_total = _money(payment.overpayment.remaining_amount)
+        except SupplierOverpayment.DoesNotExist:
+            overpayment_total = ZERO_MONEY
+        covered_total = _money(allocation_total + overpayment_total)
+        if not payment.allocations.exists() and overpayment_total == ZERO_MONEY:
             _append(
                 section,
                 "critical",
-                f"Active supplier payment #{payment.id} ({payment.supplier.name}, {payment.amount}) has no allocations.",
+                f"Active supplier payment #{payment.id} ({payment.supplier.name}, {payment.amount}) has no allocations or overpayment record.",
             )
-        if allocation_total > _money(payment.amount):
+        if covered_total > _money(payment.amount):
             _append(
                 section,
                 "critical",
-                f"Supplier payment #{payment.id} allocations {allocation_total} exceed payment amount {payment.amount}.",
+                f"Supplier payment #{payment.id} coverage {covered_total} exceeds payment amount {payment.amount}.",
             )
-        if allocation_total != _money(payment.amount):
+        if covered_total != _money(payment.amount):
             _append(
                 section,
                 "warning",
-                f"Supplier payment #{payment.id} allocations {allocation_total} differ from payment amount {payment.amount}.",
+                f"Supplier payment #{payment.id} coverage {covered_total} differs from payment amount {payment.amount}.",
             )
 
     cancelled_payments = SupplierPayment.objects.select_related("store", "supplier").filter(
         status=SupplierPayment.STATUS_CANCELLED
     )
     for payment in cancelled_payments:
-        if payment.allocations.exists():
+        if payment.allocations.exists() or hasattr(payment, "overpayment"):
             _append(
                 section,
                 "warning",
-                f"Cancelled supplier payment #{payment.id} still has allocation rows.",
+                f"Cancelled supplier payment #{payment.id} still has allocation rows or overpayment state.",
             )
 
     purchase_paid = defaultdict(lambda: ZERO_MONEY)
@@ -339,6 +344,20 @@ def _audit_suppliers():
                 section,
                 "critical",
                 f"Purchase #{key[0]} store #{key[1]} overpaid: allocated={allocated}, total={meta['total']}.",
+            )
+
+    for overpayment in SupplierOverpayment.objects.select_related("supplier", "store", "source_payment"):
+        if overpayment.remaining_amount < ZERO_MONEY:
+            _append(
+                section,
+                "critical",
+                f"Supplier overpayment #{overpayment.id} is negative: {overpayment.remaining_amount}.",
+            )
+        if overpayment.amount < overpayment.remaining_amount:
+            _append(
+                section,
+                "critical",
+                f"Supplier overpayment #{overpayment.id} remaining amount exceeds original amount.",
             )
 
     if not any(section[level] for level in ("critical", "warning")):
