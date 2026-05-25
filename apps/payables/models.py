@@ -221,15 +221,37 @@ class SupplierPayment(TimeStampedModel):
 
     def cancel(self, *, reason=""):
         with transaction.atomic():
-            payment = SupplierPayment.objects.select_for_update().get(pk=self.pk)
+            payment = SupplierPayment.objects.select_for_update().select_related("store").get(pk=self.pk)
             if payment.status == self.STATUS_CANCELLED:
+                self.status = payment.status
+                self.cancelled_at = payment.cancelled_at
+                self.cancel_reason = payment.cancel_reason
                 return payment
             supplier_id = payment.supplier_id
             store_id = payment.store_id
+            cash_store_id, cash_amount = payment._cash_contribution()
+
+            if cash_store_id and cash_amount > Decimal("0.00"):
+                from apps.expenses.services import _get_cash_register, _save_cash_register
+
+                register = _get_cash_register(payment.store)
+                register.balance += cash_amount
+                _save_cash_register(register)
+
+            now = timezone.now()
+            cancel_reason = reason or payment.cancel_reason
+            SupplierPayment.objects.filter(pk=payment.pk).update(
+                status=self.STATUS_CANCELLED,
+                cancelled_at=now,
+                cancel_reason=cancel_reason,
+                updated_at=now,
+            )
             payment.status = self.STATUS_CANCELLED
-            payment.cancelled_at = timezone.now()
-            payment.cancel_reason = reason or payment.cancel_reason
-            payment.save()
+            payment.cancelled_at = now
+            payment.cancel_reason = cancel_reason
+            self.status = payment.status
+            self.cancelled_at = payment.cancelled_at
+            self.cancel_reason = payment.cancel_reason
             rebuild_supplier_payment_allocations(
                 supplier_id=supplier_id,
                 store_id=store_id,
