@@ -5,6 +5,10 @@ pip install -r requirements.txt
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
 
+echo "=== START FULL ACCOUNTING RECONCILIATION ==="
+python manage.py audit_full_accounting_reconciliation || true
+echo "=== END FULL ACCOUNTING RECONCILIATION ==="
+
 python manage.py shell -c "
 import os
 from django.contrib.auth import get_user_model

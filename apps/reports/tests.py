@@ -9,7 +9,9 @@ from django.urls import reverse
 from apps.core.models import Customer, Product, Store, Supplier
 from apps.credits.models import ClientDebtPayment
 from apps.expenses.models import ExpenseCategory, SalaryPayment, StoreExpense
+from apps.expenses.services import save_store_expense
 from apps.inventory.models import Purchase, PurchaseItem
+from apps.payables.models import SupplierPayment
 from apps.sales.models import Sale, SaleItem
 
 
@@ -205,3 +207,86 @@ class DailyReportAndAuditTests(TestCase):
         self.assertEqual(exc.exception.code, 1)
         self.assertEqual(payment.allocations.count(), 0)
         self.assertIn("has no allocations", stdout.getvalue())
+
+    def test_full_accounting_reconciliation_returns_zero_for_consistent_data(self):
+        cash_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-03",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=cash_sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("150.00"),
+        )
+        credit_sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-03",
+            payment_type=Sale.PAYMENT_TYPE_CREDIT,
+            customer=self.customer,
+        )
+        SaleItem.objects.create(
+            sale=credit_sale,
+            product=self.product,
+            quantity_kg=Decimal("2.000"),
+            sale_price_per_kg=Decimal("200.00"),
+        )
+        ClientDebtPayment.objects.create(
+            store=self.store,
+            client=self.customer,
+            amount=Decimal("100.00"),
+            payment_method=ClientDebtPayment.PAYMENT_METHOD_CASH,
+            paid_at="2026-05-04",
+        )
+        save_store_expense(
+            StoreExpense(
+                store=self.store,
+                category=self.category,
+                date="2026-05-04",
+                amount=Decimal("50.00"),
+            )
+        )
+        SupplierPayment.objects.create(
+            supplier=self.supplier,
+            store=self.store,
+            date="2026-05-04",
+            amount=Decimal("300.00"),
+        )
+
+        stdout = StringIO()
+        call_command("audit_full_accounting_reconciliation", stdout=stdout)
+        output = stdout.getvalue()
+
+        self.assertIn("READ ONLY FULL ACCOUNTING RECONCILIATION", output)
+        self.assertIn("[Sales]", output)
+        self.assertIn("[Inventory]", output)
+        self.assertIn("[Supplier Payments]", output)
+        self.assertIn("[Supplier Debts]", output)
+        self.assertIn("[Client Payments]", output)
+        self.assertIn("[Client Debts]", output)
+        self.assertIn("[Cash]", output)
+        self.assertIn("[Reports]", output)
+        self.assertIn("[Summary]", output)
+        self.assertIn("CRITICAL: 0", output)
+
+    def test_full_accounting_reconciliation_reports_saleitem_batch_mismatch(self):
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-03",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("5.000"),
+            sale_price_per_kg=Decimal("150.00"),
+        )
+        sale_item.batches.update(quantity=Decimal("4.000"))
+
+        stdout = StringIO()
+        with self.assertRaises(SystemExit) as exc:
+            call_command("audit_full_accounting_reconciliation", stdout=stdout)
+
+        self.assertEqual(exc.exception.code, 1)
+        self.assertIn("allocation quantity mismatch", stdout.getvalue())
