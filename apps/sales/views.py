@@ -1,12 +1,12 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import redirect, render
 
 from .forms import SaleCreateForm, SaleItemCreateForm, purchase_item_options_data
 from .models import CashRegister, Sale
+from .services import create_sale_from_valid_forms
 
 
 def _attach_validation_error(form, exc):
@@ -32,11 +32,7 @@ def sale_create(request):
         )
         if sale_form.is_valid() and item_form.is_valid():
             try:
-                with transaction.atomic():
-                    sale = sale_form.save()
-                    item = item_form.save(commit=False)
-                    item.sale = sale
-                    item.save()
+                create_sale_from_valid_forms(sale_form=sale_form, item_form=item_form)
             except ValidationError as exc:
                 _attach_validation_error(item_form, exc)
             else:

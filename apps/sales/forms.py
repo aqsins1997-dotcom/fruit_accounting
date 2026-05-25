@@ -137,6 +137,31 @@ class SaleItemCreateForm(forms.ModelForm):
         self.store_id = store_id
         self.fields["product"].queryset = Product.objects.order_by("name")
         self.fields["sale_price_per_kg"].required = False
+
+        selected_purchase_item_id = None
+        if self.is_bound:
+            selected_purchase_item_id = self.data.get(self.add_prefix("purchase_item"))
+
+        if selected_purchase_item_id:
+            queryset = PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product").filter(
+                id=selected_purchase_item_id,
+                purchase__deleted_at__isnull=True,
+            )
+            try:
+                store_id_value = int(store_id) if store_id else None
+            except (TypeError, ValueError):
+                store_id_value = None
+            try:
+                product_id_value = int(product_id) if product_id else None
+            except (TypeError, ValueError):
+                product_id_value = None
+            if store_id_value:
+                queryset = queryset.filter(store_id=store_id_value)
+            if product_id_value:
+                queryset = queryset.filter(product_id=product_id_value)
+            self.fields["purchase_item"].queryset = queryset
+            return
+
         purchase_items = []
         if store_id and product_id:
             purchase_items = available_purchase_item_queryset(store_id=store_id, product_id=product_id)

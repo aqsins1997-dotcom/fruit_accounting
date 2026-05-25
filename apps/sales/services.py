@@ -1,14 +1,30 @@
 from decimal import Decimal
 
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db import models as django_models, transaction
 from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.core.models import Store
+from apps.inventory.models import (
+    PurchaseItem,
+    StockMovement,
+    StoreStock,
+    sync_store_stock_from_active_inventory,
+)
 
-from .models import CashRegister, Sale, SaleItem, SaleItemBatch
+from .models import (
+    CashRegister,
+    Sale,
+    SaleItem,
+    SaleItemBatch,
+    _apply_batch_costs,
+    _apply_cash_register_delta,
+    _sale_line_total,
+    purchase_item_available_quantity,
+)
 
 ZERO = Decimal("0.00")
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
@@ -124,6 +140,155 @@ def build_cash_breakdown(store):
 
 def calculate_cash_balance(store):
     return build_cash_breakdown(store)["formula_balance"]
+
+
+def _save_model_without_overrides(instance, **kwargs):
+    django_models.Model.save(instance, **kwargs)
+
+
+def _validate_selected_sale_item(*, sale_item, sale, purchase_item):
+    if sale.deleted_at:
+        raise ValidationError({"sale": "Нельзя изменять строки удаленной продажи."})
+    if sale_item.quantity_kg is None or sale_item.quantity_kg <= Decimal("0.000"):
+        raise ValidationError({"quantity_kg": "Количество должно быть больше 0."})
+    if sale_item.sale_price_per_kg is None or sale_item.sale_price_per_kg < Decimal("0.00"):
+        raise ValidationError({"sale_price_per_kg": "Цена продажи не может быть отрицательной."})
+    if purchase_item.purchase.deleted_at:
+        raise ValidationError({"purchase_item": "Нельзя списывать товар с удаленной закупки."})
+    if purchase_item.store_id != sale.store_id:
+        raise ValidationError({"purchase_item": "Выбранная закупка относится к другому магазину."})
+    if purchase_item.product_id != sale_item.product_id:
+        raise ValidationError({"purchase_item": "Выбранная закупка относится к другому товару."})
+
+    available_quantity = purchase_item_available_quantity(purchase_item)
+    if sale_item.quantity_kg > available_quantity:
+        raise ValidationError(
+            {
+                "quantity_kg": (
+                    "Недостаточно остатка в выбранной закупке. "
+                    f"Доступно: {available_quantity} кг."
+                )
+            }
+        )
+
+
+def _sync_stock_after_fast_sale(*, sale, sale_item):
+    stock, created = StoreStock.objects.select_for_update().get_or_create(
+        store_id=sale.store_id,
+        product_id=sale_item.product_id,
+        defaults={
+            "quantity_kg": Decimal("0.000"),
+            "average_purchase_price": Decimal("0.00"),
+        },
+    )
+    if created:
+        sync_store_stock_from_active_inventory(store_id=sale.store_id, product_id=sale_item.product_id)
+        return
+
+    stock.quantity_kg -= sale_item.quantity_kg
+    if stock.quantity_kg < Decimal("0.000"):
+        stock.quantity_kg = Decimal("0.000")
+    stock.save(update_fields=["quantity_kg", "updated_at"])
+
+
+def _sync_sale_totals_after_fast_sale(*, sale, sale_item):
+    sale.total_amount = sale_item.line_total
+    sale.total_cost = sale_item.line_cost_total
+    sale.total_profit = sale_item.profit
+    now = timezone.now()
+    Sale.objects.filter(pk=sale.pk).update(
+        total_amount=sale.total_amount,
+        total_cost=sale.total_cost,
+        total_profit=sale.total_profit,
+        updated_at=now,
+    )
+
+    if sale.payment_type == Sale.PAYMENT_TYPE_CASH:
+        _apply_cash_register_delta(store_id=sale.store_id, amount=sale.total_amount)
+        return
+
+    if sale.payment_type == Sale.PAYMENT_TYPE_CREDIT:
+        from apps.credits.models import Credit
+
+        Credit.objects.create(
+            sale=sale,
+            customer=sale.customer,
+            store=sale.store,
+            original_amount=sale.total_amount,
+            remaining_amount=sale.total_amount,
+            status=Credit.STATUS_PAID if sale.total_amount == Decimal("0.00") else Credit.STATUS_UNPAID,
+            comment=sale.comment,
+        )
+
+
+def _create_sale_item_from_selected_batch(sale_item):
+    selected_purchase_item = getattr(sale_item, "_selected_purchase_item", None)
+    selected_purchase_item_id = getattr(sale_item, "_selected_purchase_item_id", None)
+    if selected_purchase_item is not None:
+        selected_purchase_item_id = selected_purchase_item.pk
+
+    if not selected_purchase_item_id:
+        raise ValidationError({"purchase_item": "Выберите закупку/партию, с которой списывается товар."})
+
+    sale = getattr(sale_item, "sale", None)
+    if sale is None or not sale.pk:
+        sale = Sale.objects.select_for_update().select_related("store", "customer").get(pk=sale_item.sale_id)
+    purchase_item = (
+        PurchaseItem.objects.select_for_update()
+        .select_related("purchase", "purchase__supplier")
+        .get(pk=selected_purchase_item_id)
+    )
+
+    _validate_selected_sale_item(sale_item=sale_item, sale=sale, purchase_item=purchase_item)
+
+    sale_item.sale = sale
+    sale_item.line_total = _sale_line_total(sale_item)
+    total_cost = sale_item.quantity_kg * purchase_item.purchase_price_per_kg
+    _apply_batch_costs(sale_item, total_cost)
+
+    _save_model_without_overrides(sale_item, force_insert=True)
+
+    now = timezone.now()
+    SaleItemBatch.objects.bulk_create(
+        [
+            SaleItemBatch(
+                created_at=now,
+                updated_at=now,
+                sale_item=sale_item,
+                purchase_item=purchase_item,
+                quantity=sale_item.quantity_kg,
+                sale_price=sale_item.sale_price_per_kg,
+                total_amount=sale_item.line_total,
+            )
+        ]
+    )
+
+    StockMovement.objects.create(
+        store_id=sale.store_id,
+        product_id=sale_item.product_id,
+        movement_type="sale_out",
+        quantity_kg_delta=sale_item.quantity_kg,
+        unit_cost=sale_item.cost_price_per_kg,
+        total_cost=sale_item.line_cost_total,
+        reference_note=f"Sale #{sale.id}",
+        date=sale.date,
+    )
+    _sync_stock_after_fast_sale(sale=sale, sale_item=sale_item)
+    _sync_sale_totals_after_fast_sale(sale=sale, sale_item=sale_item)
+
+    return sale_item
+
+
+@transaction.atomic
+def create_sale_from_valid_forms(*, sale_form, item_form):
+    sale = sale_form.save(commit=False)
+    sale.clean()
+    _save_model_without_overrides(sale, force_insert=True)
+
+    sale_item = item_form.save(commit=False)
+    sale_item.sale = sale
+    _create_sale_item_from_selected_batch(sale_item)
+    return sale
 
 
 @transaction.atomic

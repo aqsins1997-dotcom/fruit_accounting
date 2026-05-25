@@ -4,7 +4,9 @@ from io import StringIO
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db import connection
 from django.test import Client, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.core.models import Customer, Product, Store, Supplier
@@ -63,6 +65,58 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(stock.quantity_kg, Decimal("15.000"))
         register = CashRegister.objects.get(store=self.store)
         self.assertEqual(register.balance, Decimal("150.00"))
+
+    def test_cash_sale_post_query_count_stays_bounded(self):
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.post(
+                reverse("sales:sale_create"),
+                {
+                    "store": self.store.id,
+                    "date": "2026-04-19",
+                    "payment_type": "cash",
+                    "customer": "",
+                    "comment": "profile",
+                    "product": self.product.id,
+                    "purchase_item": self.purchase_item.id,
+                    "quantity_kg": "5.000",
+                    "sale_price_per_kg": "30.00",
+                    "sale_total": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertLessEqual(len(ctx.captured_queries), 30)
+        self.assertEqual(SaleItemBatch.objects.get().purchase_item_id, self.purchase_item.id)
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("15.000"))
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("150.00"))
+
+    def test_credit_sale_post_query_count_stays_bounded(self):
+        customer = Customer.objects.create(name="Credit customer")
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.post(
+                reverse("sales:sale_create"),
+                {
+                    "store": self.store.id,
+                    "date": "2026-04-19",
+                    "payment_type": "credit",
+                    "customer": customer.id,
+                    "comment": "profile",
+                    "product": self.product.id,
+                    "purchase_item": self.purchase_item.id,
+                    "quantity_kg": "5.000",
+                    "sale_price_per_kg": "30.00",
+                    "sale_total": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertLessEqual(len(ctx.captured_queries), 30)
+        self.assertEqual(SaleItemBatch.objects.get().purchase_item_id, self.purchase_item.id)
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("15.000"))
+        self.assertFalse(CashRegister.objects.filter(store=self.store).exists())
+        debt = build_debtor_rows()[0]
+        self.assertEqual(debt["total_debt"], Decimal("150.00"))
 
     def test_sale_create_requires_purchase_batch(self):
         response = self.client.post(

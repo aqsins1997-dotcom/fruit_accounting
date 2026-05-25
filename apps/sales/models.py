@@ -210,6 +210,7 @@ class Sale(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
+            is_new = self.pk is None
             old_store_id = None
             old_cash_amount = Decimal("0.00")
 
@@ -241,7 +242,11 @@ class Sale(TimeStampedModel):
                 _apply_cash_register_delta(store_id=old_store_id, amount=-old_cash_amount)
                 _apply_cash_register_delta(store_id=new_store_id, amount=new_cash_amount)
 
-            self.sync_credit()
+            should_sync_credit = not is_new
+            if is_new and self.payment_type == self.PAYMENT_TYPE_CREDIT and self.total_amount != Decimal("0.00"):
+                should_sync_credit = True
+            if should_sync_credit:
+                self.sync_credit()
 
     def delete(self, *args, **kwargs):
         changed = self.soft_delete()
