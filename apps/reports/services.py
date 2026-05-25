@@ -57,6 +57,49 @@ def _set_identity(target, row, *, group_by_store, store_prefix="", product_prefi
         target["store_name"] = row[f"{store_prefix}store__name"]
 
 
+def calculate_total_stock_quantity():
+    from apps.inventory.models import PurchaseItem
+    from apps.sales.models import SaleItemBatch
+
+    purchased_by_product_store = {
+        (row["store_id"], row["product_id"]): row["total"] or ZERO_QUANTITY
+        for row in PurchaseItem.objects.filter(
+            purchase__deleted_at__isnull=True,
+        )
+        .values("store_id", "product_id")
+        .annotate(
+            total=Coalesce(
+                Sum("quantity_kg"),
+                Value(ZERO_QUANTITY, output_field=QUANTITY_FIELD),
+                output_field=QUANTITY_FIELD,
+            )
+        )
+    }
+    sold_by_product_store = {
+        (row["purchase_item__store_id"], row["purchase_item__product_id"]): row["total"] or ZERO_QUANTITY
+        for row in SaleItemBatch.objects.filter(
+            purchase_item__purchase__deleted_at__isnull=True,
+            sale_item__sale__deleted_at__isnull=True,
+        )
+        .values("purchase_item__store_id", "purchase_item__product_id")
+        .annotate(
+            total=Coalesce(
+                Sum("quantity"),
+                Value(ZERO_QUANTITY, output_field=QUANTITY_FIELD),
+                output_field=QUANTITY_FIELD,
+            )
+        )
+    }
+
+    stock_quantity = ZERO_QUANTITY
+    for key, purchased_quantity in purchased_by_product_store.items():
+        row_stock = purchased_quantity - sold_by_product_store.get(key, ZERO_QUANTITY)
+        if row_stock > ZERO_QUANTITY:
+            stock_quantity += row_stock
+
+    return _quantity(stock_quantity)
+
+
 def build_product_profitability_rows(
     *,
     store=None,

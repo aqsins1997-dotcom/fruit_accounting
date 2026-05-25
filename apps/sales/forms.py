@@ -1,17 +1,24 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
+from django.db.models import Sum
 from django.utils import timezone
 
 from apps.core.models import Customer, Product, Store
 from apps.inventory.models import PurchaseItem
 
-from .models import Sale, SaleItem, purchase_item_available_quantity
+from .models import Sale, SaleItem, SaleItemBatch, purchase_item_available_quantity
 
 
 class PurchaseItemChoiceField(forms.ModelChoiceField):
     def label_from_instance(self, obj):
-        available_quantity = purchase_item_available_quantity(obj)
+        available_quantity = getattr(
+            obj,
+            "_available_quantity",
+            getattr(self, "available_quantities", {}).get(obj.id),
+        )
+        if available_quantity is None:
+            available_quantity = purchase_item_available_quantity(obj)
         purchase_date = obj.purchase.date.strftime("%d.%m.%Y") if obj.purchase.date else "-"
         return (
             f"Закупка №{obj.purchase_id} от {purchase_date} | "
@@ -40,11 +47,32 @@ def available_purchase_item_queryset(*, store_id=None, product_id=None):
     if product_id:
         queryset = queryset.filter(product_id=product_id)
 
-    return [
-        purchase_item
-        for purchase_item in queryset
-        if purchase_item_available_quantity(purchase_item) > Decimal("0.000")
-    ]
+    purchase_items = list(queryset)
+    purchase_item_ids = [purchase_item.id for purchase_item in purchase_items]
+    allocated_quantities = {
+        row["purchase_item_id"]: row["total"] or Decimal("0.000")
+        for row in SaleItemBatch.objects.filter(
+            purchase_item_id__in=purchase_item_ids,
+            purchase_item__purchase__deleted_at__isnull=True,
+            sale_item__sale__deleted_at__isnull=True,
+        )
+        .values("purchase_item_id")
+        .annotate(total=Sum("quantity"))
+    }
+
+    available_purchase_items = []
+    for purchase_item in purchase_items:
+        available_quantity = purchase_item.quantity_kg - allocated_quantities.get(
+            purchase_item.id,
+            Decimal("0.000"),
+        )
+        if available_quantity < Decimal("0.000"):
+            available_quantity = Decimal("0.000")
+        purchase_item._available_quantity = available_quantity.quantize(Decimal("0.001"))
+        if purchase_item._available_quantity > Decimal("0.000"):
+            available_purchase_items.append(purchase_item)
+
+    return available_purchase_items
 
 
 def purchase_item_options_data():
@@ -55,7 +83,7 @@ def purchase_item_options_data():
             "store_id": purchase_item.store_id,
             "product_id": purchase_item.product_id,
             "label": label_field.label_from_instance(purchase_item),
-            "available": str(purchase_item_available_quantity(purchase_item)),
+            "available": str(purchase_item._available_quantity),
         }
         for purchase_item in available_purchase_item_queryset()
     ]
@@ -109,9 +137,13 @@ class SaleItemCreateForm(forms.ModelForm):
         self.store_id = store_id
         self.fields["product"].queryset = Product.objects.order_by("name")
         self.fields["sale_price_per_kg"].required = False
-        purchase_item_ids = [
-            item.id for item in available_purchase_item_queryset(store_id=store_id, product_id=product_id)
-        ]
+        purchase_items = []
+        if store_id and product_id:
+            purchase_items = available_purchase_item_queryset(store_id=store_id, product_id=product_id)
+            self.fields["purchase_item"].available_quantities = {
+                item.id: item._available_quantity for item in purchase_items
+            }
+        purchase_item_ids = [item.id for item in purchase_items]
         self.fields["purchase_item"].queryset = (
             PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product")
             .filter(id__in=purchase_item_ids)

@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.core.models import Product, Store
 from apps.expenses.models import EmployeeAdvance, Expense, SalaryPayment, StoreExpense
-from apps.reports.services import build_product_profitability_rows
+from apps.reports.services import calculate_total_stock_quantity
 from apps.sales.models import CashRegister, Sale
 
 
@@ -18,10 +18,7 @@ def index(request):
     stores_count = Store.objects.count()
     products_count = Product.objects.count()
 
-    total_stock = sum(
-        (row["stock_quantity"] for row in build_product_profitability_rows(group_by_store=True)),
-        Decimal("0.000"),
-    )
+    total_stock = calculate_total_stock_quantity()
     today_sales = Sale.objects.filter(
         date=today,
         deleted_at__isnull=True,

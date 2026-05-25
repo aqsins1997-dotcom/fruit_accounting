@@ -89,18 +89,19 @@ def purchase_item_price_update(request, pk):
 
 @login_required
 def purchase_item_quantity_update(request, pk):
-    with transaction.atomic():
-        item = get_object_or_404(
-            PurchaseItem.objects.select_for_update().select_related(
-                "purchase__supplier",
-                "store",
-                "product",
-            ).filter(purchase__deleted_at__isnull=True),
-            pk=pk,
-        )
+    item_queryset = PurchaseItem.objects.select_related(
+        "purchase__supplier",
+        "store",
+        "product",
+    ).filter(purchase__deleted_at__isnull=True)
 
-        preview = None
-        if request.method == "POST":
+    if request.method == "POST":
+        with transaction.atomic():
+            item = get_object_or_404(
+                item_queryset.select_for_update(),
+                pk=pk,
+            )
+            preview = None
             form = PurchaseItemQuantityUpdateForm(request.POST, instance=item)
             if form.is_valid():
                 preview = form.build_preview()
@@ -108,8 +109,13 @@ def purchase_item_quantity_update(request, pk):
                     form.save()
                     messages.success(request, "Вес закупки успешно обновлен.")
                     return redirect("inventory:purchase_list")
-        else:
-            form = PurchaseItemQuantityUpdateForm(instance=item)
+    else:
+        item = get_object_or_404(
+            item_queryset,
+            pk=pk,
+        )
+        preview = None
+        form = PurchaseItemQuantityUpdateForm(instance=item)
 
     return render(
         request,

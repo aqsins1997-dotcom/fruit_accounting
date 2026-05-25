@@ -2,9 +2,11 @@ from decimal import Decimal
 
 from django import forms
 from django.db.models import Sum
+from django.utils.functional import cached_property
 from django.utils import timezone
 
 from apps.core.models import Product, Store, Supplier
+from apps.payables.models import SupplierPaymentAllocation
 from apps.payables.services import apply_purchase_item_rebalance_update, build_purchase_item_rebalance_preview
 from apps.sales.models import SaleItemBatch
 
@@ -88,7 +90,7 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
             ),
         }
 
-    @property
+    @cached_property
     def sold_quantity(self):
         if not self.instance.pk:
             return Decimal("0.000")
@@ -101,20 +103,34 @@ class PurchaseItemQuantityUpdateForm(forms.ModelForm):
             or Decimal("0.000")
         )
 
-    @property
+    @cached_property
     def current_stock_quantity(self):
         stock = self.instance.quantity_kg - self.sold_quantity
         return stock if stock > 0 else Decimal("0.000")
 
-    @property
+    @cached_property
     def paid_amount(self):
-        return build_purchase_item_rebalance_preview(purchase_item=self.instance)["old_allocated_payment"]
+        return (
+            SupplierPaymentAllocation.objects.filter(
+                purchase_id=self.instance.purchase_id,
+                store_id=self.instance.store_id,
+                payment__status="active",
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+
+    @cached_property
+    def sibling_purchase_total_for_store(self):
+        return sum(
+            (
+                item.quantity_kg * item.purchase_price_per_kg
+                for item in self.instance.purchase.items.filter(store_id=self.instance.store_id).exclude(pk=self.instance.pk)
+            ),
+            Decimal("0.00"),
+        )
 
     def purchase_total_for_store(self, quantity):
-        total = quantity * self.instance.purchase_price_per_kg
-        for item in self.instance.purchase.items.filter(store=self.instance.store).exclude(pk=self.instance.pk):
-            total += item.quantity_kg * item.purchase_price_per_kg
-        return total
+        return self.sibling_purchase_total_for_store + quantity * self.instance.purchase_price_per_kg
 
     @property
     def current_purchase_total_for_store(self):
