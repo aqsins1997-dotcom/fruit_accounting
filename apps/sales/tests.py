@@ -375,6 +375,30 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
         self.assertEqual(Credit.objects.filter(sale=sale).count(), 1)
 
+    def test_cash_sale_to_credit_updates_existing_credit_record(self):
+        customer = Customer.objects.create(name="Existing credit customer")
+        sale, _ = self._create_cash_sale_from_batch(total=Decimal("83500.00"))
+        existing_credit = Credit.objects.create(
+            sale=sale,
+            customer=customer,
+            store=self.store,
+            original_amount=Decimal("1.00"),
+            remaining_amount=Decimal("1.00"),
+            status=Credit.STATUS_PARTIAL,
+        )
+
+        convert_sale_cash_to_credit(sale_id=sale.pk, customer_id=customer.pk)
+
+        sale.refresh_from_db()
+        existing_credit.refresh_from_db()
+        self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CREDIT)
+        self.assertEqual(sale.customer_id, customer.pk)
+        self.assertEqual(Credit.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(existing_credit.original_amount, Decimal("83500.00"))
+        self.assertEqual(existing_credit.remaining_amount, Decimal("83500.00"))
+        self.assertEqual(existing_credit.status, Credit.STATUS_UNPAID)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+
     def test_cash_to_credit_ui_post_converts_sale(self):
         customer = Customer.objects.create(name="UI customer")
         sale, _ = self._create_cash_sale_from_batch(total=Decimal("150.00"))

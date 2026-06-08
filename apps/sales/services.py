@@ -96,11 +96,7 @@ def preview_sale_cash_to_credit(*, sale_id, customer=None):
 
 @transaction.atomic
 def convert_sale_cash_to_credit(*, sale_id, customer_id, note=""):
-    sale = (
-        Sale.objects.select_for_update()
-        .select_related("store", "customer")
-        .get(pk=sale_id)
-    )
+    sale = Sale.objects.select_for_update().get(pk=sale_id)
     customer = Customer.objects.select_for_update().get(pk=customer_id)
 
     validate_sale_cash_to_credit(sale=sale, customer=customer)
@@ -305,7 +301,7 @@ def _create_sale_item_from_selected_batch(sale_item):
 
     sale = getattr(sale_item, "sale", None)
     if sale is None or not sale.pk:
-        sale = Sale.objects.select_for_update().select_related("store", "customer").get(pk=sale_item.sale_id)
+        sale = Sale.objects.select_for_update().select_related("store").get(pk=sale_item.sale_id)
     purchase_item = (
         PurchaseItem.objects.select_for_update()
         .select_related("purchase", "purchase__supplier")
