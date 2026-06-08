@@ -2,11 +2,11 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import SaleCreateForm, SaleItemCreateForm, purchase_item_options_data
+from .forms import SaleCashToCreditForm, SaleCreateForm, SaleItemCreateForm, purchase_item_options_data
 from .models import CashRegister, Sale
-from .services import create_sale_from_valid_forms
+from .services import convert_sale_cash_to_credit, create_sale_from_valid_forms, preview_sale_cash_to_credit
 
 
 def _attach_validation_error(form, exc):
@@ -66,6 +66,52 @@ def sale_list(request):
         {
             "sales": sales,
             "cash_registers": cash_registers,
+        },
+    )
+
+
+@login_required
+def sale_cash_to_credit(request, pk):
+    sale = get_object_or_404(
+        Sale.objects.select_related("store", "customer")
+        .prefetch_related("items__product", "items__batches__purchase_item__purchase__supplier")
+        .filter(deleted_at__isnull=True),
+        pk=pk,
+    )
+    if sale.payment_type != Sale.PAYMENT_TYPE_CASH:
+        messages.error(request, "Эта продажа уже не является наличной.")
+        return redirect("sales:sale_list")
+
+    if request.method == "POST":
+        form = SaleCashToCreditForm(request.POST)
+        if form.is_valid():
+            customer = form.cleaned_data["customer"]
+            try:
+                convert_sale_cash_to_credit(
+                    sale_id=sale.pk,
+                    customer_id=customer.pk,
+                    note=f"Переведена из наличной продажи в кредит. Клиент: {customer}.",
+                )
+            except ValidationError as exc:
+                _attach_validation_error(form, exc)
+            else:
+                messages.success(request, "Продажа переведена в кредит. Касса и долг клиента пересчитаны.")
+                return redirect("sales:sale_list")
+    else:
+        form = SaleCashToCreditForm()
+
+    preview_customer = None
+    if form.is_bound and form.is_valid():
+        preview_customer = form.cleaned_data["customer"]
+    preview = preview_sale_cash_to_credit(sale_id=sale.pk, customer=preview_customer)
+
+    return render(
+        request,
+        "sales/sale_cash_to_credit.html",
+        {
+            "sale": sale,
+            "form": form,
+            "preview": preview,
         },
     )
 

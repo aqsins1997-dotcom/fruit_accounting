@@ -7,7 +7,7 @@ from django.db.models import Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from apps.core.models import Store
+from apps.core.models import Customer, Store
 from apps.inventory.models import (
     PurchaseItem,
     StockMovement,
@@ -38,6 +38,79 @@ def _sum_amount(queryset, field_name="amount"):
     return queryset.aggregate(
         total=Coalesce(Sum(field_name), Value(ZERO, output_field=MONEY_FIELD))
     )["total"] or ZERO
+
+
+def _validation_message(exc):
+    if hasattr(exc, "message_dict"):
+        return "; ".join(
+            str(message)
+            for messages in exc.message_dict.values()
+            for message in messages
+        )
+    return "; ".join(str(message) for message in exc.messages)
+
+
+def _append_sale_system_note(sale, note):
+    if not note:
+        return
+    sale.comment = f"{sale.comment}\n{note}".strip() if sale.comment else note
+
+
+def validate_sale_cash_to_credit(*, sale, customer):
+    if not customer:
+        raise ValidationError({"customer": "Выберите клиента для продажи в кредит."})
+    if sale.deleted_at:
+        raise ValidationError({"sale": "Удалённую продажу нельзя перевести в кредит."})
+    if sale.payment_type != Sale.PAYMENT_TYPE_CASH:
+        raise ValidationError({"payment_type": "Эта продажа уже не является наличной."})
+    if sale.customer_id and sale.customer_id != customer.id:
+        raise ValidationError({"customer": "У наличной продажи уже указан другой клиент."})
+
+
+def preview_sale_cash_to_credit(*, sale_id, customer=None):
+    sale = (
+        Sale.objects.select_related("store", "customer")
+        .prefetch_related("items__product", "items__batches__purchase_item__purchase__supplier")
+        .get(pk=sale_id)
+    )
+
+    can_apply = True
+    error = ""
+    try:
+        validate_sale_cash_to_credit(sale=sale, customer=customer)
+    except ValidationError as exc:
+        can_apply = False
+        error = _validation_message(exc)
+
+    return {
+        "sale": sale,
+        "customer": customer,
+        "can_apply": can_apply,
+        "error": error,
+        "cash_impact": -_money(sale.total_amount),
+        "client_debt_impact": _money(sale.total_amount) if customer else ZERO,
+        "inventory_impact": "NO",
+        "supplier_debt_impact": "NO",
+    }
+
+
+@transaction.atomic
+def convert_sale_cash_to_credit(*, sale_id, customer_id, note=""):
+    sale = (
+        Sale.objects.select_for_update()
+        .select_related("store", "customer")
+        .get(pk=sale_id)
+    )
+    customer = Customer.objects.select_for_update().get(pk=customer_id)
+
+    validate_sale_cash_to_credit(sale=sale, customer=customer)
+
+    sale.payment_type = Sale.PAYMENT_TYPE_CREDIT
+    sale.customer = customer
+    _append_sale_system_note(sale, note)
+    sale.save()
+    sale.refresh_from_db()
+    return sale
 
 
 def build_cash_breakdown(store):

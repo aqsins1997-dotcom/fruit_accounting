@@ -107,6 +107,19 @@ class SaleCreateForm(forms.ModelForm):
             self.initial["date"] = timezone.now().date()
 
 
+class SaleCashToCreditForm(forms.Form):
+    customer = forms.ModelChoiceField(
+        label="Клиент",
+        queryset=Customer.objects.none(),
+        empty_label="Выберите клиента",
+        required=True,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["customer"].queryset = Customer.objects.order_by("name")
+
+
 class SaleItemCreateForm(forms.ModelForm):
     purchase_item = PurchaseItemChoiceField(
         label="Закупка / партия",

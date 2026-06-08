@@ -22,6 +22,7 @@
                             <th>Клиент</th>
                             <th>Товары / Вес</th>
                             <th>Сумма</th>
+                            <th>Действия</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -55,6 +56,13 @@
                                 {% endfor %}
                             </td>
                             <td>{{ sale.total_amount|floatformat:2 }}</td>
+                            <td>
+                                {% if sale.payment_type == "cash" %}
+                                    <a href="{% url 'sales:sale_cash_to_credit' sale.pk %}" class="btn">Перевести в кредит</a>
+                                {% else %}
+                                    <span class="page-subtitle">-</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

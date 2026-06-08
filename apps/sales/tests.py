@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.core.models import Customer, Product, Store, Supplier
-from apps.credits.models import ClientDebtPayment
+from apps.credits.models import ClientDebtPayment, Credit
 from apps.credits.services import build_debtor_rows
 from apps.expenses.models import ExpenseCategory, StoreExpense
 from apps.inventory.models import Purchase, PurchaseItem, StoreStock, calculate_active_stock_quantity
@@ -18,7 +18,12 @@ from apps.payables.models import SupplierPayment
 from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 
 from .models import CashRegister, Sale, SaleItem, SaleItemBatch, purchase_item_available_quantity
-from .services import build_cash_breakdown, recalculate_cash_registers
+from .services import (
+    build_cash_breakdown,
+    convert_sale_cash_to_credit,
+    preview_sale_cash_to_credit,
+    recalculate_cash_registers,
+)
 
 
 class SalesNoAdminViewsTests(TestCase):
@@ -38,6 +43,34 @@ class SalesNoAdminViewsTests(TestCase):
             quantity_kg=Decimal("20.000"),
             purchase_price_per_kg=Decimal("10.00"),
         )
+
+    def _create_cash_sale_from_batch(
+        self,
+        *,
+        purchase_item=None,
+        product=None,
+        quantity=Decimal("5.000"),
+        price=Decimal("30.00"),
+        total=None,
+    ):
+        purchase_item = purchase_item or self.purchase_item
+        product = product or purchase_item.product
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-04-19",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        item = SaleItem(
+            sale=sale,
+            product=product,
+            quantity_kg=quantity,
+            sale_price_per_kg=price,
+        )
+        item._selected_purchase_item = purchase_item
+        if total is not None:
+            item._sale_total_override = total
+        item.save()
+        return sale, item
 
     def test_sale_create_page_renders(self):
         response = self.client.get(reverse("sales:sale_create"))
@@ -243,6 +276,175 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertContains(response, "5,000")
         self.assertContains(response, "30,00")
         self.assertContains(response, "150,00")
+
+    def test_sale_list_shows_cash_to_credit_action_for_cash_sales(self):
+        sale, _ = self._create_cash_sale_from_batch()
+
+        response = self.client.get(reverse("sales:sale_list"), HTTP_HOST="localhost")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("sales:sale_cash_to_credit", args=[sale.pk]))
+        self.assertContains(response, "Перевести в кредит")
+
+    def test_cash_sale_can_be_converted_to_credit_safely(self):
+        customer = Customer.objects.create(name="Арых")
+        product = Product.objects.create(name="Черешня")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-06-06")
+        purchase_item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=product,
+            quantity_kg=Decimal("500.000"),
+            purchase_price_per_kg=Decimal("500.00"),
+        )
+        sale, sale_item = self._create_cash_sale_from_batch(
+            purchase_item=purchase_item,
+            product=product,
+            quantity=Decimal("185.500"),
+            price=Decimal("450.13"),
+            total=Decimal("83500.00"),
+        )
+        batch_before = list(
+            SaleItemBatch.objects.filter(sale_item=sale_item).values(
+                "purchase_item_id",
+                "quantity",
+                "sale_price",
+                "total_amount",
+            )
+        )
+        available_before = purchase_item_available_quantity(purchase_item)
+        stock_before = StoreStock.objects.get(store=self.store, product=product).quantity_kg
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("83500.00"))
+
+        converted_sale = convert_sale_cash_to_credit(
+            sale_id=sale.pk,
+            customer_id=customer.pk,
+            note="Test conversion",
+        )
+
+        converted_sale.refresh_from_db()
+        sale_item.refresh_from_db()
+        self.assertEqual(converted_sale.payment_type, Sale.PAYMENT_TYPE_CREDIT)
+        self.assertEqual(converted_sale.customer_id, customer.pk)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+        credit = Credit.objects.get(sale=converted_sale)
+        self.assertEqual(credit.customer_id, customer.pk)
+        self.assertEqual(credit.original_amount, Decimal("83500.00"))
+        self.assertEqual(credit.remaining_amount, Decimal("83500.00"))
+        self.assertEqual(build_debtor_rows()[0]["total_debt"], Decimal("83500.00"))
+        self.assertEqual(
+            list(
+                SaleItemBatch.objects.filter(sale_item=sale_item).values(
+                    "purchase_item_id",
+                    "quantity",
+                    "sale_price",
+                    "total_amount",
+                )
+            ),
+            batch_before,
+        )
+        self.assertEqual(purchase_item_available_quantity(purchase_item), available_before)
+        self.assertEqual(StoreStock.objects.get(store=self.store, product=product).quantity_kg, stock_before)
+        self.assertEqual(sale_item.line_total, Decimal("83500.00"))
+        self.assertEqual(sale_item.line_cost_total, Decimal("92750.00"))
+
+        audit_output = StringIO()
+        call_command("audit_accounting_integrity", stdout=audit_output)
+        self.assertIn("CRITICAL: 0", audit_output.getvalue())
+
+    def test_cash_sale_to_credit_requires_customer(self):
+        sale, _ = self._create_cash_sale_from_batch()
+
+        preview = preview_sale_cash_to_credit(sale_id=sale.pk, customer=None)
+
+        self.assertFalse(preview["can_apply"])
+        self.assertIn("клиента", preview["error"])
+        self.assertEqual(Sale.objects.get(pk=sale.pk).payment_type, Sale.PAYMENT_TYPE_CASH)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("150.00"))
+
+    def test_cash_sale_to_credit_is_idempotent(self):
+        customer = Customer.objects.create(name="Credit customer")
+        sale, _ = self._create_cash_sale_from_batch(total=Decimal("150.00"))
+
+        convert_sale_cash_to_credit(sale_id=sale.pk, customer_id=customer.pk)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+
+        with self.assertRaises(ValidationError):
+            convert_sale_cash_to_credit(sale_id=sale.pk, customer_id=customer.pk)
+
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+        self.assertEqual(Credit.objects.filter(sale=sale).count(), 1)
+
+    def test_cash_to_credit_ui_post_converts_sale(self):
+        customer = Customer.objects.create(name="UI customer")
+        sale, _ = self._create_cash_sale_from_batch(total=Decimal("150.00"))
+
+        get_response = self.client.get(reverse("sales:sale_cash_to_credit", args=[sale.pk]), HTTP_HOST="localhost")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertContains(get_response, "Касса магазина уменьшится")
+
+        response = self.client.post(
+            reverse("sales:sale_cash_to_credit", args=[sale.pk]),
+            {"customer": customer.pk},
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sale.refresh_from_db()
+        self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CREDIT)
+        self.assertEqual(sale.customer_id, customer.pk)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+
+    def test_convert_sale_cash_to_credit_command_dry_run_and_apply(self):
+        customer = Customer.objects.create(name="Command customer")
+        sale, _ = self._create_cash_sale_from_batch(total=Decimal("83500.00"))
+
+        dry_run_output = StringIO()
+        call_command(
+            "convert_sale_cash_to_credit",
+            "--sale-id",
+            str(sale.pk),
+            "--client-id",
+            str(customer.pk),
+            stdout=dry_run_output,
+        )
+        self.assertIn("DRY RUN", dry_run_output.getvalue())
+        self.assertIn("cash impact: -83500.00", dry_run_output.getvalue())
+        self.assertIn("client debt impact: +83500.00", dry_run_output.getvalue())
+        self.assertIn("can_apply: YES", dry_run_output.getvalue())
+        sale.refresh_from_db()
+        self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CASH)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("83500.00"))
+
+        apply_output = StringIO()
+        call_command(
+            "convert_sale_cash_to_credit",
+            "--sale-id",
+            str(sale.pk),
+            "--client-id",
+            str(customer.pk),
+            "--apply",
+            stdout=apply_output,
+        )
+        self.assertIn(f"converted sale #{sale.pk} to credit", apply_output.getvalue())
+        sale.refresh_from_db()
+        self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CREDIT)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+
+    def test_verify_sale_payment_type_command_is_read_only(self):
+        customer = Customer.objects.create(name="Verify customer")
+        sale, _ = self._create_cash_sale_from_batch(total=Decimal("83500.00"))
+        convert_sale_cash_to_credit(sale_id=sale.pk, customer_id=customer.pk)
+
+        output = StringIO()
+        call_command("verify_sale_payment_type", "--sale-id", str(sale.pk), stdout=output)
+
+        self.assertIn("READ ONLY SALE PAYMENT TYPE VERIFICATION", output.getvalue())
+        self.assertIn("payment type: credit", output.getvalue())
+        self.assertIn("client debt effect expected: 83500.00", output.getvalue())
+        self.assertIn("represented correctly in cash/client debt: YES", output.getvalue())
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
 
     def test_sale_delete_is_soft_and_restores_active_stock_cash_and_purchase_metrics(self):
         product = Product.objects.create(name="Apple")

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Перевести продажу в кредит{% endblock %}
+{% block page_title %}Перевести продажу в кредит{% endblock %}
+{% block page_subtitle %}Без изменения товара, FIFO, закупок и себестоимости{% endblock %}
+
+{% block content %}
+<section class="grid grid--2" style="gap: 24px;">
+    <section class="card">
+        <h3 class="card__title">Продажа №{{ sale.id }}</h3>
+        <div class="table-wrap">
+            <table class="table">
+                <tbody>
+                    <tr><th>Дата</th><td>{{ sale.date|date:"d.m.Y" }}</td></tr>
+                    <tr><th>Магазин</th><td>{{ sale.store.name }}</td></tr>
+                    <tr><th>Текущий тип оплаты</th><td>{{ sale.get_payment_type_display }}</td></tr>
+                    <tr><th>Текущий клиент</th><td>{{ sale.customer|default:"-" }}</td></tr>
+                    <tr><th>Сумма продажи</th><td>{{ sale.total_amount|floatformat:2 }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3 class="card__title" style="margin-top: 24px;">Товары</h3>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Товар</th>
+                        <th>Вес</th>
+                        <th>Цена</th>
+                        <th>Сумма</th>
+                        <th>Партия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in sale.items.all %}
+                        <tr>
+                            <td>{{ item.product.name }}</td>
+                            <td>{{ item.quantity_kg|floatformat:3 }}</td>
+                            <td>{{ item.sale_price_per_kg|floatformat:2 }}</td>
+                            <td>{{ item.line_total|floatformat:2 }}</td>
+                            <td>
+                                {% for batch in item.batches.all %}
+                                    Закупка №{{ batch.purchase_item.purchase_id }}
+                                    от {{ batch.purchase_item.purchase.date|date:"d.m.Y" }},
+                                    {{ batch.purchase_item.purchase.supplier.name }},
+                                    {{ batch.quantity|floatformat:3 }} кг
+                                {% empty %}
+                                    <span class="badge badge--warning">Партия не указана</span>
+                                {% endfor %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5">Нет строк продажи</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card form-card">
+        <h3 class="card__title">Новый тип оплаты</h3>
+        <div class="message warning" style="margin-bottom: 18px;">
+            Касса магазина уменьшится на сумму продажи, у клиента появится долг.
+            FIFO allocations, остатки, закупки, поставщики, себестоимость и прибыль не изменятся.
+        </div>
+
+        <div class="table-wrap" style="margin-bottom: 18px;">
+            <table class="table">
+                <tbody>
+                    <tr><th>Касса</th><td>{{ preview.cash_impact|floatformat:2 }}</td></tr>
+                    <tr><th>Долг клиента</th><td>+{{ sale.total_amount|floatformat:2 }}</td></tr>
+                    <tr><th>Остатки</th><td>{{ preview.inventory_impact }}</td></tr>
+                    <tr><th>Долги поставщикам</th><td>{{ preview.supplier_debt_impact }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <form method="post" class="form-grid">
+            {% csrf_token %}
+            <div class="form-group form-group--full">
+                <label for="{{ form.customer.id_for_label }}">{{ form.customer.label }}</label>
+                {{ form.customer }}
+                {% if form.customer.errors %}
+                    <div class="message error">{{ form.customer.errors|join:", " }}</div>
+                {% endif %}
+            </div>
+            {% if form.non_field_errors %}
+                <div class="form-group form-group--full">
+                    <div class="message error">{{ form.non_field_errors|join:", " }}</div>
+                </div>
+            {% endif %}
+            <div class="form-group form-group--full">
+                <button type="submit" class="btn btn--primary">Перевести в кредит</button>
+                <a href="{% url 'sales:sale_list' %}" class="btn">Отмена</a>
+            </div>
+        </form>
+    </section>
+</section>
+{% endblock %}
