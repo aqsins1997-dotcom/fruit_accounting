@@ -382,6 +382,18 @@ class SalesNoAdminViewsTests(TestCase):
         get_response = self.client.get(reverse("sales:sale_cash_to_credit", args=[sale.pk]), HTTP_HOST="localhost")
         self.assertEqual(get_response.status_code, 200)
         self.assertContains(get_response, "Касса магазина уменьшится")
+        self.assertContains(get_response, "UI customer")
+
+        missing_customer_response = self.client.post(
+            reverse("sales:sale_cash_to_credit", args=[sale.pk]),
+            {"customer": ""},
+            HTTP_HOST="localhost",
+        )
+        self.assertEqual(missing_customer_response.status_code, 200)
+        self.assertContains(missing_customer_response, "Обязательное поле")
+        sale.refresh_from_db()
+        self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CASH)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("150.00"))
 
         response = self.client.post(
             reverse("sales:sale_cash_to_credit", args=[sale.pk]),
@@ -395,6 +407,16 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertEqual(sale.payment_type, Sale.PAYMENT_TYPE_CREDIT)
         self.assertEqual(sale.customer_id, customer.pk)
         self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+
+        repeat_response = self.client.post(
+            reverse("sales:sale_cash_to_credit", args=[sale.pk]),
+            {"customer": customer.pk},
+            follow=True,
+            HTTP_HOST="localhost",
+        )
+        self.assertEqual(repeat_response.status_code, 200)
+        self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("0.00"))
+        self.assertEqual(Credit.objects.filter(sale=sale).count(), 1)
 
     def test_convert_sale_cash_to_credit_command_dry_run_and_apply(self):
         customer = Customer.objects.create(name="Command customer")

@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
@@ -70,6 +71,45 @@ def sale_list(request):
     )
 
 
+def _sale_item_rows_for_payment_change(sale):
+    rows = []
+    for item in sale.items.all():
+        batch_rows = []
+        for batch in item.batches.all():
+            try:
+                purchase_item = batch.purchase_item
+                purchase = purchase_item.purchase
+                supplier_name = purchase.supplier.name if purchase.supplier_id else "-"
+                batch_rows.append(
+                    {
+                        "purchase_id": purchase_item.purchase_id,
+                        "purchase_date": purchase.date,
+                        "supplier_name": supplier_name,
+                        "quantity": batch.quantity,
+                    }
+                )
+            except ObjectDoesNotExist:
+                batch_rows.append(
+                    {
+                        "purchase_id": None,
+                        "purchase_date": None,
+                        "supplier_name": "-",
+                        "quantity": batch.quantity,
+                    }
+                )
+
+        rows.append(
+            {
+                "product_name": item.product.name if item.product_id else "-",
+                "quantity_kg": item.quantity_kg,
+                "sale_price_per_kg": item.sale_price_per_kg,
+                "line_total": item.line_total,
+                "batches": batch_rows,
+            }
+        )
+    return rows
+
+
 @login_required
 def sale_cash_to_credit(request, pk):
     sale = get_object_or_404(
@@ -110,6 +150,7 @@ def sale_cash_to_credit(request, pk):
         "sales/sale_cash_to_credit.html",
         {
             "sale": sale,
+            "sale_item_rows": _sale_item_rows_for_payment_change(sale),
             "form": form,
             "preview": preview,
         },

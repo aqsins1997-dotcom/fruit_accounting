@@ -33,17 +33,21 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for item in sale.items.all %}
+                    {% for item in sale_item_rows %}
                         <tr>
-                            <td>{{ item.product.name }}</td>
+                            <td>{{ item.product_name }}</td>
                             <td>{{ item.quantity_kg|floatformat:3 }}</td>
                             <td>{{ item.sale_price_per_kg|floatformat:2 }}</td>
                             <td>{{ item.line_total|floatformat:2 }}</td>
                             <td>
-                                {% for batch in item.batches.all %}
-                                    Закупка №{{ batch.purchase_item.purchase_id }}
-                                    от {{ batch.purchase_item.purchase.date|date:"d.m.Y" }},
-                                    {{ batch.purchase_item.purchase.supplier.name }},
+                                {% for batch in item.batches %}
+                                    {% if batch.purchase_id %}
+                                        Закупка №{{ batch.purchase_id }}
+                                    {% else %}
+                                        Закупка не найдена
+                                    {% endif %}
+                                    {% if batch.purchase_date %}от {{ batch.purchase_date|date:"d.m.Y" }},{% endif %}
+                                    {{ batch.supplier_name }},
                                     {{ batch.quantity|floatformat:3 }} кг
                                 {% empty %}
                                     <span class="badge badge--warning">Партия не указана</span>
