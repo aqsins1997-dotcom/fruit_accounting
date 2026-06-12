@@ -10,7 +10,7 @@ from apps.payables.models import SupplierPaymentAllocation
 from apps.payables.services import apply_purchase_item_rebalance_update, build_purchase_item_rebalance_preview
 from apps.sales.models import SaleItemBatch
 
-from .models import Purchase, PurchaseItem
+from .models import Purchase, PurchaseItem, change_purchase_item_product
 
 
 class PurchaseCreateForm(forms.ModelForm):
@@ -38,6 +38,25 @@ class PurchaseItemCreateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["store"].queryset = Store.objects.order_by("name")
         self.fields["product"].queryset = Product.objects.order_by("name")
+
+
+class PurchaseItemProductUpdateForm(forms.ModelForm):
+    class Meta:
+        model = PurchaseItem
+        fields = ("product",)
+        labels = {
+            "product": "Новый товар",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["product"].queryset = Product.objects.order_by("name")
+
+    def save(self, commit=True):
+        return change_purchase_item_product(
+            purchase_item=self.instance,
+            product=self.cleaned_data["product"],
+        )
 
 
 class PurchaseItemPriceUpdateForm(forms.ModelForm):

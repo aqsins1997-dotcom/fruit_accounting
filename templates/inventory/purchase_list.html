@@ -55,6 +55,11 @@
                                         class="btn"
                                         style="min-height: 32px; padding: 0 12px; margin-left: 8px;"
                                     >Изменить вес</a>
+                                    <a
+                                        href="{% url 'inventory:purchase_item_product_update' item.id %}"
+                                        class="btn"
+                                        style="min-height: 32px; padding: 0 12px; margin-left: 8px;"
+                                    >Изменить товар</a>
                                 </div>
                             {% empty %}
                                 -

@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
 from apps.payables.models import SupplierOverpayment, SupplierPayment, SupplierPaymentAllocation
-from apps.reports.services import build_purchase_item_profitability_map
+from apps.reports.services import build_product_profitability_rows, build_purchase_item_profitability_map
 from apps.sales.models import CashRegister, Sale, SaleItem, SaleItemBatch
 
 from .models import Purchase, PurchaseItem, StockMovement, StoreStock
@@ -44,6 +44,7 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertContains(purchase_response, "средняя продажа")
         self.assertContains(purchase_response, "прибыль")
         self.assertContains(purchase_response, "Изменить цену")
+        self.assertContains(purchase_response, "Изменить товар")
 
     def test_purchase_profitability_is_calculated_per_batch(self):
         first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-06")
@@ -318,6 +319,170 @@ class InventoryNoAdminViewsTests(TestCase):
         group = response.context["supplier_groups"][0]
         self.assertEqual(group["remaining_amount"], Decimal("0.00"))
         self.assertEqual(group["overpayment_amount"], Decimal("1000.00"))
+
+    def test_purchase_item_product_update_moves_stock_to_new_product(self):
+        new_product = Product.objects.create(name="Груша")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("25.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_product_update", args=[item.id]),
+            {"product": new_product.id},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Товар закупки успешно обновлен.")
+        item.refresh_from_db()
+        self.assertEqual(item.product_id, new_product.id)
+        self.assertEqual(
+            StoreStock.objects.get(store=self.store, product=self.product).quantity_kg,
+            Decimal("0.000"),
+        )
+        self.assertEqual(
+            StoreStock.objects.get(store=self.store, product=new_product).quantity_kg,
+            Decimal("10.000"),
+        )
+
+    def test_purchase_item_product_update_moves_linked_sales_and_profitability_to_new_product(self):
+        new_product = Product.objects.create(name="Груша")
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-02",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("30.000"),
+            sale_price_per_kg=Decimal("50.00"),
+        )
+        sale_item._selected_purchase_item = item
+        sale_item.save()
+        batch = SaleItemBatch.objects.get(sale_item=sale_item)
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_product_update", args=[item.id]),
+            {"product": new_product.id},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item.refresh_from_db()
+        sale_item.refresh_from_db()
+        batch.refresh_from_db()
+        self.assertEqual(item.product_id, new_product.id)
+        self.assertEqual(sale_item.product_id, new_product.id)
+        self.assertEqual(batch.purchase_item_id, item.id)
+        self.assertEqual(
+            StoreStock.objects.get(store=self.store, product=self.product).quantity_kg,
+            Decimal("0.000"),
+        )
+        self.assertEqual(
+            StoreStock.objects.get(store=self.store, product=new_product).quantity_kg,
+            Decimal("70.000"),
+        )
+
+        old_product_rows = build_product_profitability_rows(store=self.store, product=self.product)
+        new_product_rows = build_product_profitability_rows(store=self.store, product=new_product)
+        self.assertEqual(old_product_rows, [])
+        self.assertEqual(new_product_rows[0]["purchased_quantity"], Decimal("100.000"))
+        self.assertEqual(new_product_rows[0]["sold_quantity"], Decimal("30.000"))
+        self.assertEqual(new_product_rows[0]["stock_quantity"], Decimal("70.000"))
+        self.assertEqual(new_product_rows[0]["revenue"], Decimal("1500.00"))
+        self.assertEqual(new_product_rows[0]["sold_cost"], Decimal("300.00"))
+        self.assertEqual(new_product_rows[0]["profit"], Decimal("1200.00"))
+
+        purchase_profitability = build_purchase_item_profitability_map(purchase_item_ids=[item.id])
+        self.assertEqual(purchase_profitability[item.id]["product_id"], new_product.id)
+        self.assertEqual(purchase_profitability[item.id]["sold_quantity"], Decimal("30.000"))
+        self.assertEqual(purchase_profitability[item.id]["stock_quantity"], Decimal("70.000"))
+
+    def test_purchase_item_product_update_noops_when_product_is_unchanged(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("25.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_product_update", args=[item.id]),
+            {"product": self.product.id},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Товар закупки не изменился.")
+        item.refresh_from_db()
+        self.assertEqual(item.product_id, self.product.id)
+
+    def test_purchase_item_product_update_rejects_multi_batch_sale_items(self):
+        new_product = Product.objects.create(name="Груша")
+        first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        first_item = PurchaseItem.objects.create(
+            purchase=first_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("10.00"),
+        )
+        second_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-02")
+        second_item = PurchaseItem.objects.create(
+            purchase=second_purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("100.000"),
+            purchase_price_per_kg=Decimal("12.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-03",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        sale_item = SaleItem(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("30.000"),
+            sale_price_per_kg=Decimal("50.00"),
+        )
+        sale_item._selected_purchase_item = first_item
+        sale_item.save()
+        SaleItemBatch.objects.create(
+            sale_item=sale_item,
+            purchase_item=second_item,
+            quantity=Decimal("5.000"),
+            sale_price=Decimal("50.00"),
+            total_amount=Decimal("250.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory:purchase_item_product_update", args=[first_item.id]),
+            {"product": new_product.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "распределена по нескольким партиям")
+        first_item.refresh_from_db()
+        sale_item.refresh_from_db()
+        self.assertEqual(first_item.product_id, self.product.id)
+        self.assertEqual(sale_item.product_id, self.product.id)
 
     def test_purchase_delete_is_soft_and_keeps_sales_history(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")

@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -9,6 +10,7 @@ from .forms import (
     PurchaseCreateForm,
     PurchaseItemCreateForm,
     PurchaseItemPriceUpdateForm,
+    PurchaseItemProductUpdateForm,
     PurchaseItemQuantityUpdateForm,
 )
 from .models import Purchase, PurchaseItem
@@ -16,6 +18,18 @@ from .models import Purchase, PurchaseItem
 
 def _action_from_request(request):
     return request.POST.get("action") or "preview"
+
+
+def _attach_validation_error(form, exc):
+    if hasattr(exc, "message_dict"):
+        for field, errors in exc.message_dict.items():
+            target = field if field in form.fields else None
+            for error in errors:
+                form.add_error(target, error)
+        return
+
+    for error in getattr(exc, "messages", [str(exc)]):
+        form.add_error(None, error)
 
 
 @login_required
@@ -57,6 +71,38 @@ def purchase_list(request):
             item.profitability = profitability_map.get(item.id)
 
     return render(request, "inventory/purchase_list.html", {"purchases": purchases})
+
+
+@login_required
+def purchase_item_product_update(request, pk):
+    item = get_object_or_404(
+        PurchaseItem.objects.select_related("purchase__supplier", "store", "product").filter(
+            purchase__deleted_at__isnull=True
+        ),
+        pk=pk,
+    )
+
+    if request.method == "POST":
+        form = PurchaseItemProductUpdateForm(request.POST, instance=item)
+        if form.is_valid():
+            try:
+                result = form.save()
+            except ValidationError as exc:
+                _attach_validation_error(form, exc)
+            else:
+                if result["changed"]:
+                    messages.success(request, "Товар закупки успешно обновлен.")
+                else:
+                    messages.success(request, "Товар закупки не изменился.")
+                return redirect("inventory:purchase_list")
+    else:
+        form = PurchaseItemProductUpdateForm(instance=item)
+
+    return render(
+        request,
+        "inventory/purchase_product_update.html",
+        {"form": form, "item": item},
+    )
 
 
 @login_required

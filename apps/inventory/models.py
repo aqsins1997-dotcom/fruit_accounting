@@ -113,6 +113,98 @@ def sync_store_stock_from_active_inventory(*, store_id, product_id):
     return stock
 
 
+def change_purchase_item_product(*, purchase_item, product):
+    if not purchase_item or not purchase_item.pk:
+        raise ValidationError({"product": "Строка закупки не найдена."})
+    if not product or not product.pk:
+        raise ValidationError({"product": "Выберите товар."})
+
+    with transaction.atomic():
+        item = (
+            PurchaseItem.objects.select_for_update()
+            .select_related("purchase", "store", "product")
+            .get(pk=purchase_item.pk)
+        )
+        if item.purchase.deleted_at:
+            raise ValidationError({"product": "Нельзя менять товар удаленной закупки."})
+
+        try:
+            new_product = Product.objects.get(pk=product.pk)
+        except Product.DoesNotExist as exc:
+            raise ValidationError({"product": "Выберите существующий товар."}) from exc
+        old_product = item.product
+        old_product_id = item.product_id
+        new_product_id = new_product.pk
+
+        if old_product_id == new_product_id:
+            return {
+                "changed": False,
+                "purchase_item": item,
+                "old_product": old_product,
+                "new_product": new_product,
+                "updated_sale_items": 0,
+            }
+
+        from apps.sales.models import SaleItem, SaleItemBatch
+
+        linked_sale_item_ids = sorted(
+            set(
+                SaleItemBatch.objects.select_for_update()
+                .filter(purchase_item_id=item.pk)
+                .values_list("sale_item_id", flat=True)
+            )
+        )
+
+        if linked_sale_item_ids:
+            other_batch = (
+                SaleItemBatch.objects.select_for_update()
+                .select_related("sale_item__sale")
+                .filter(sale_item_id__in=linked_sale_item_ids)
+                .exclude(purchase_item_id=item.pk)
+                .order_by("sale_item__sale_id", "sale_item_id", "id")
+                .first()
+            )
+            if other_batch:
+                raise ValidationError(
+                    {
+                        "product": (
+                            "Нельзя изменить товар: продажа "
+                            f"№{other_batch.sale_item.sale_id} распределена по нескольким партиям. "
+                            "Сначала исправьте распределение этой продажи."
+                        )
+                    }
+                )
+
+            list(
+                SaleItem.objects.select_for_update()
+                .filter(id__in=linked_sale_item_ids)
+                .values_list("id", flat=True)
+            )
+
+        now = timezone.now()
+        PurchaseItem.objects.filter(pk=item.pk).update(product_id=new_product_id, updated_at=now)
+        if linked_sale_item_ids:
+            SaleItem.objects.filter(id__in=linked_sale_item_ids).update(
+                product_id=new_product_id,
+                updated_at=now,
+            )
+
+        sync_store_stock_from_active_inventory(store_id=item.store_id, product_id=old_product_id)
+        sync_store_stock_from_active_inventory(store_id=item.store_id, product_id=new_product_id)
+
+        item.product = new_product
+        item.product_id = new_product_id
+        item.updated_at = now
+
+        return {
+            "changed": True,
+            "purchase_item": item,
+            "old_product": old_product,
+            "new_product": new_product,
+            "updated_sale_items": len(linked_sale_item_ids),
+        }
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
