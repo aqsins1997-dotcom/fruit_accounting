@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models as django_models, transaction
 from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models import Prefetch
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
 from apps.core.models import Customer, Store
@@ -23,11 +23,11 @@ from .models import (
     _apply_batch_costs,
     _apply_cash_register_delta,
     _sale_line_total,
-    purchase_item_available_quantity,
 )
 
 ZERO = Decimal("0.00")
 MONEY_FIELD = DecimalField(max_digits=12, decimal_places=2)
+QUANTITY_FIELD = DecimalField(max_digits=10, decimal_places=3)
 
 
 def _money(value):
@@ -215,6 +215,20 @@ def _save_model_without_overrides(instance, **kwargs):
     django_models.Model.save(instance, **kwargs)
 
 
+def _available_quantity_for_locked_purchase_item(purchase_item):
+    allocated_quantity = (
+        SaleItemBatch.objects.filter(
+            purchase_item_id=purchase_item.pk,
+            sale_item__sale__deleted_at__isnull=True,
+        ).aggregate(total=Sum("quantity"))["total"]
+        or Decimal("0.000")
+    )
+    available_quantity = purchase_item.quantity_kg - allocated_quantity
+    if available_quantity < Decimal("0.000"):
+        return Decimal("0.000")
+    return available_quantity.quantize(Decimal("0.001"))
+
+
 def _validate_selected_sale_item(*, sale_item, sale, purchase_item):
     if sale.deleted_at:
         raise ValidationError({"sale": "Нельзя изменять строки удаленной продажи."})
@@ -229,7 +243,7 @@ def _validate_selected_sale_item(*, sale_item, sale, purchase_item):
     if purchase_item.product_id != sale_item.product_id:
         raise ValidationError({"purchase_item": "Выбранная закупка относится к другому товару."})
 
-    available_quantity = purchase_item_available_quantity(purchase_item)
+    available_quantity = _available_quantity_for_locked_purchase_item(purchase_item)
     if sale_item.quantity_kg > available_quantity:
         raise ValidationError(
             {
@@ -242,22 +256,22 @@ def _validate_selected_sale_item(*, sale_item, sale, purchase_item):
 
 
 def _sync_stock_after_fast_sale(*, sale, sale_item):
-    stock, created = StoreStock.objects.select_for_update().get_or_create(
+    updated = StoreStock.objects.filter(
         store_id=sale.store_id,
         product_id=sale_item.product_id,
-        defaults={
-            "quantity_kg": Decimal("0.000"),
-            "average_purchase_price": Decimal("0.00"),
-        },
+    ).update(
+        quantity_kg=Greatest(
+            django_models.ExpressionWrapper(
+                django_models.F("quantity_kg") - sale_item.quantity_kg,
+                output_field=QUANTITY_FIELD,
+            ),
+            Value(Decimal("0.000"), output_field=QUANTITY_FIELD),
+        ),
+        updated_at=timezone.now(),
     )
-    if created:
-        sync_store_stock_from_active_inventory(store_id=sale.store_id, product_id=sale_item.product_id)
+    if updated:
         return
-
-    stock.quantity_kg -= sale_item.quantity_kg
-    if stock.quantity_kg < Decimal("0.000"):
-        stock.quantity_kg = Decimal("0.000")
-    stock.save(update_fields=["quantity_kg", "updated_at"])
+    sync_store_stock_from_active_inventory(store_id=sale.store_id, product_id=sale_item.product_id)
 
 
 def _sync_sale_totals_after_fast_sale(*, sale, sale_item):
@@ -304,7 +318,7 @@ def _create_sale_item_from_selected_batch(sale_item):
         sale = Sale.objects.select_for_update().select_related("store").get(pk=sale_item.sale_id)
     purchase_item = (
         PurchaseItem.objects.select_for_update()
-        .select_related("purchase", "purchase__supplier")
+        .select_related("purchase")
         .get(pk=selected_purchase_item_id)
     )
 
@@ -351,7 +365,6 @@ def _create_sale_item_from_selected_batch(sale_item):
 @transaction.atomic
 def create_sale_from_valid_forms(*, sale_form, item_form):
     sale = sale_form.save(commit=False)
-    sale.clean()
     _save_model_without_overrides(sale, force_insert=True)
 
     sale_item = item_form.save(commit=False)

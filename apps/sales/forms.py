@@ -1,13 +1,29 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db.models import Sum
+from django.forms.models import construct_instance
 from django.utils import timezone
 
 from apps.core.models import Customer, Product, Store
 from apps.inventory.models import PurchaseItem
 
 from .models import Sale, SaleItem, SaleItemBatch, purchase_item_available_quantity
+
+
+class FastCleanModelForm(forms.ModelForm):
+    def _post_clean(self):
+        opts = self._meta
+        try:
+            self.instance = construct_instance(self, self.instance, opts.fields, opts.exclude)
+        except ValidationError as exc:
+            self._update_errors(exc)
+
+        try:
+            self.instance.clean()
+        except ValidationError as exc:
+            self._update_errors(exc)
 
 
 class PurchaseItemChoiceField(forms.ModelChoiceField):
@@ -29,7 +45,7 @@ class PurchaseItemChoiceField(forms.ModelChoiceField):
 
 def available_purchase_item_queryset(*, store_id=None, product_id=None):
     queryset = (
-        PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product")
+        PurchaseItem.objects.select_related("purchase", "purchase__supplier")
         .filter(purchase__deleted_at__isnull=True)
         .order_by("purchase__date", "id")
     )
@@ -89,7 +105,7 @@ def purchase_item_options_data():
     ]
 
 
-class SaleCreateForm(forms.ModelForm):
+class SaleCreateForm(FastCleanModelForm):
     class Meta:
         model = Sale
         fields = ("store", "date", "payment_type", "customer", "comment")
@@ -120,7 +136,7 @@ class SaleCashToCreditForm(forms.Form):
         self.fields["customer"].queryset = Customer.objects.order_by("name")
 
 
-class SaleItemCreateForm(forms.ModelForm):
+class SaleItemCreateForm(FastCleanModelForm):
     purchase_item = PurchaseItemChoiceField(
         label="Закупка / партия",
         queryset=PurchaseItem.objects.none(),
@@ -156,7 +172,7 @@ class SaleItemCreateForm(forms.ModelForm):
             selected_purchase_item_id = self.data.get(self.add_prefix("purchase_item"))
 
         if selected_purchase_item_id:
-            queryset = PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product").filter(
+            queryset = PurchaseItem.objects.select_related("purchase", "purchase__supplier").filter(
                 id=selected_purchase_item_id,
                 purchase__deleted_at__isnull=True,
             )
@@ -183,7 +199,7 @@ class SaleItemCreateForm(forms.ModelForm):
             }
         purchase_item_ids = [item.id for item in purchase_items]
         self.fields["purchase_item"].queryset = (
-            PurchaseItem.objects.select_related("purchase", "purchase__supplier", "store", "product")
+            PurchaseItem.objects.select_related("purchase", "purchase__supplier")
             .filter(id__in=purchase_item_ids)
             .order_by("purchase__date", "id")
         )
