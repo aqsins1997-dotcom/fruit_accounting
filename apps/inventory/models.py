@@ -205,6 +205,53 @@ def change_purchase_item_product(*, purchase_item, product):
         }
 
 
+def change_purchase_item_price(*, purchase_item, new_unit_price):
+    if not purchase_item or not purchase_item.pk:
+        raise ValidationError({"purchase_price_per_kg": "Строка закупки не найдена."})
+    if new_unit_price is None:
+        raise ValidationError({"purchase_price_per_kg": "Укажите новую закупочную цену."})
+    if new_unit_price < Decimal("0.00"):
+        raise ValidationError({"purchase_price_per_kg": "Цена не может быть отрицательной."})
+
+    with transaction.atomic(savepoint=False):
+        item = (
+            PurchaseItem.objects.select_for_update()
+            .select_related("purchase")
+            .get(pk=purchase_item.pk)
+        )
+        if item.purchase.deleted_at:
+            raise ValidationError({"purchase_price_per_kg": "Нельзя менять удаленную закупку."})
+
+        old_price = item.purchase_price_per_kg
+        if old_price == new_unit_price:
+            return item
+
+        now = timezone.now()
+        PurchaseItem.objects.filter(pk=item.pk).update(
+            purchase_price_per_kg=new_unit_price,
+            updated_at=now,
+        )
+        item.purchase_price_per_kg = new_unit_price
+        item.updated_at = now
+
+        stock = _get_or_create_locked_stock(store_id=item.store_id, product_id=item.product_id)
+        average_purchase_price = _weighted_average_purchase_price(
+            store_id=item.store_id,
+            product_id=item.product_id,
+        )
+        StoreStock.objects.filter(pk=stock.pk).update(
+            average_purchase_price=average_purchase_price,
+            updated_at=now,
+        )
+
+        _rebuild_supplier_payment_allocations({(item.purchase.supplier_id, item.store_id)})
+
+        from apps.sales.services import recalculate_sale_costs_for_purchase_item
+
+        recalculate_sale_costs_for_purchase_item(item)
+        return item
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

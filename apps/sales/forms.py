@@ -207,14 +207,6 @@ class SaleItemCreateForm(forms.ModelForm):
             if store_id and purchase_item.store_id != store_id:
                 self.add_error("purchase_item", "Выбранная закупка относится к другому магазину.")
 
-        if purchase_item and quantity:
-            available_quantity = purchase_item_available_quantity(purchase_item)
-            if quantity > available_quantity:
-                self.add_error(
-                    "quantity_kg",
-                    f"Недостаточно остатка в выбранной закупке. Доступно: {available_quantity} кг.",
-                )
-
         if quantity and quantity > 0 and sale_total is not None:
             cleaned_data["sale_price_per_kg"] = (sale_total / quantity).quantize(
                 Decimal("0.01"),

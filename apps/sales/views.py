@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -54,18 +55,21 @@ def sale_create(request):
 
 @login_required
 def sale_list(request):
-    sales = (
+    sales_queryset = (
         Sale.objects.select_related("store", "customer")
         .filter(deleted_at__isnull=True)
         .prefetch_related("items__product", "items__batches__purchase_item__purchase__supplier")
         .order_by("-date", "-id")
     )
+    paginator = Paginator(sales_queryset, 100)
+    page_obj = paginator.get_page(request.GET.get("page"))
     cash_registers = CashRegister.objects.select_related("store").order_by("store__name")
     return render(
         request,
         "sales/sale_list.html",
         {
-            "sales": sales,
+            "sales": page_obj.object_list,
+            "page_obj": page_obj,
             "cash_registers": cash_registers,
         },
     )

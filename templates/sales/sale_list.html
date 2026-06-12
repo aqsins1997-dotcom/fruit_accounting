@@ -68,6 +68,17 @@
                     </tbody>
                 </table>
             </div>
+            {% if page_obj.has_other_pages %}
+                <div class="quick-actions" style="margin-top: 18px;">
+                    {% if page_obj.has_previous %}
+                        <a href="?page={{ page_obj.previous_page_number }}" class="btn">Назад</a>
+                    {% endif %}
+                    <span class="page-subtitle">Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+                    {% if page_obj.has_next %}
+                        <a href="?page={{ page_obj.next_page_number }}" class="btn">Вперед</a>
+                    {% endif %}
+                </div>
+            {% endif %}
         {% else %}
             <div class="empty-state"><h3>Продаж пока нет</h3></div>
         {% endif %}

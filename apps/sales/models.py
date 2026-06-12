@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from apps.core.models import Product, Store, Customer
@@ -63,12 +63,21 @@ def _apply_cash_register_delta(*, store_id, amount):
     if not store_id or amount == Decimal("0.00"):
         return
 
-    register, _ = CashRegister.objects.select_for_update().get_or_create(
-        store_id=store_id,
-        defaults={"balance": Decimal("0.00")},
+    now = timezone.now()
+    updated = CashRegister.objects.filter(store_id=store_id).update(
+        balance=models.F("balance") + amount,
+        updated_at=now,
     )
-    register.balance += amount
-    register.save(update_fields=["balance", "updated_at"])
+    if updated:
+        return
+
+    try:
+        CashRegister.objects.create(store_id=store_id, balance=amount)
+    except IntegrityError:
+        CashRegister.objects.filter(store_id=store_id).update(
+            balance=models.F("balance") + amount,
+            updated_at=now,
+        )
 
 
 class Sale(TimeStampedModel):

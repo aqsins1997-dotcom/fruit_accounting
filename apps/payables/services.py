@@ -216,7 +216,7 @@ def simulate_supplier_settlement(*, supplier_id, store_id, purchase_total_overri
     }
 
 
-@transaction.atomic
+@transaction.atomic(savepoint=False)
 def rebuild_supplier_settlement_state(*, supplier_id, store_id):
     from .models import SupplierOverpayment, SupplierPaymentAllocation
 
@@ -386,21 +386,39 @@ def build_purchase_item_rebalance_preview(*, purchase_item, new_quantity=None, n
     }
 
 
-@transaction.atomic
-def apply_purchase_item_rebalance_update(*, purchase_item, new_quantity=None, new_unit_price=None):
-    preview = build_purchase_item_rebalance_preview(
-        purchase_item=purchase_item,
-        new_quantity=new_quantity,
-        new_unit_price=new_unit_price,
-    )
+@transaction.atomic(savepoint=False)
+def apply_purchase_item_rebalance_update(
+    *,
+    purchase_item,
+    new_quantity=None,
+    new_unit_price=None,
+    return_preview=False,
+):
+    preview = None
+    if return_preview:
+        preview = build_purchase_item_rebalance_preview(
+            purchase_item=purchase_item,
+            new_quantity=new_quantity,
+            new_unit_price=new_unit_price,
+        )
 
-    if new_quantity is not None:
+    if new_quantity is None and new_unit_price is not None:
+        from apps.inventory.models import change_purchase_item_price
+
+        change_purchase_item_price(
+            purchase_item=purchase_item,
+            new_unit_price=new_unit_price,
+        )
+    elif new_quantity is not None:
         purchase_item.quantity_kg = new_quantity
-    if new_unit_price is not None:
-        purchase_item.purchase_price_per_kg = new_unit_price
-    purchase_item.save()
+        if new_unit_price is not None:
+            purchase_item.purchase_price_per_kg = new_unit_price
+        purchase_item.save()
 
-    refreshed_preview = build_purchase_item_rebalance_preview(purchase_item=purchase_item)
+    refreshed_preview = None
+    if return_preview:
+        purchase_item.refresh_from_db()
+        refreshed_preview = build_purchase_item_rebalance_preview(purchase_item=purchase_item)
     return {
         "before": preview,
         "after": refreshed_preview,

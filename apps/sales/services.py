@@ -360,13 +360,14 @@ def create_sale_from_valid_forms(*, sale_form, item_form):
     return sale
 
 
-@transaction.atomic
+@transaction.atomic(savepoint=False)
 def recalculate_sale_costs_for_purchase_item(purchase_item):
     sale_item_ids = list(
         SaleItemBatch.objects.filter(
             purchase_item=purchase_item,
             sale_item__sale__deleted_at__isnull=True,
         )
+        .order_by()
         .values_list("sale_item_id", flat=True)
         .distinct()
     )

@@ -118,11 +118,11 @@ def purchase_item_price_update(request, pk):
     if request.method == "POST":
         form = PurchaseItemPriceUpdateForm(request.POST, instance=item)
         if form.is_valid():
-            preview = form.build_preview()
             if _action_from_request(request) == "apply":
                 form.save()
                 messages.success(request, "Цена закупки успешно обновлена.")
                 return redirect("inventory:purchase_list")
+            preview = form.build_preview()
     else:
         form = PurchaseItemPriceUpdateForm(instance=item)
 
@@ -150,11 +150,11 @@ def purchase_item_quantity_update(request, pk):
             preview = None
             form = PurchaseItemQuantityUpdateForm(request.POST, instance=item)
             if form.is_valid():
-                preview = form.build_preview()
                 if _action_from_request(request) == "apply":
                     form.save()
                     messages.success(request, "Вес закупки успешно обновлен.")
                     return redirect("inventory:purchase_list")
+                preview = form.build_preview()
     else:
         item = get_object_or_404(
             item_queryset,

@@ -47,6 +47,7 @@ class Command(BaseCommand):
             purchase_item=purchase_item,
             new_quantity=new_quantity,
             new_unit_price=new_unit_price,
+            return_preview=True,
         )
         self.stdout.write("")
         self.stdout.write("AFTER APPLY")

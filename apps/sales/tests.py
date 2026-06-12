@@ -118,7 +118,7 @@ class SalesNoAdminViewsTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 302)
-        self.assertLessEqual(len(ctx.captured_queries), 30)
+        self.assertLessEqual(len(ctx.captured_queries), 24)
         self.assertEqual(SaleItemBatch.objects.get().purchase_item_id, self.purchase_item.id)
         self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("15.000"))
         self.assertEqual(CashRegister.objects.get(store=self.store).balance, Decimal("150.00"))
@@ -144,7 +144,7 @@ class SalesNoAdminViewsTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 302)
-        self.assertLessEqual(len(ctx.captured_queries), 30)
+        self.assertLessEqual(len(ctx.captured_queries), 24)
         self.assertEqual(SaleItemBatch.objects.get().purchase_item_id, self.purchase_item.id)
         self.assertEqual(StoreStock.objects.get(store=self.store, product=self.product).quantity_kg, Decimal("15.000"))
         self.assertFalse(CashRegister.objects.filter(store=self.store).exists())

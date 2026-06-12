@@ -2,7 +2,9 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.test import Client, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.core.models import Product, Store, Supplier
@@ -201,6 +203,36 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertEqual(profitability[item.id]["sold_cost"], Decimal("1200.00"))
         self.assertEqual(profitability[item.id]["profit"], Decimal("400.00"))
         self.assertEqual(profitability[item.id]["margin_per_unit"], Decimal("100.00"))
+
+    def test_purchase_item_price_update_apply_query_count_stays_bounded(self):
+        purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
+        item = PurchaseItem.objects.create(
+            purchase=purchase,
+            store=self.store,
+            product=self.product,
+            quantity_kg=Decimal("10.000"),
+            purchase_price_per_kg=Decimal("330.00"),
+        )
+        sale = Sale.objects.create(
+            store=self.store,
+            date="2026-05-02",
+            payment_type=Sale.PAYMENT_TYPE_CASH,
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity_kg=Decimal("4.000"),
+            sale_price_per_kg=Decimal("400.00"),
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.post(
+                reverse("inventory:purchase_item_price_update", args=[item.id]),
+                {"purchase_price_per_kg": "300.00", "action": "apply"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertLessEqual(len(ctx.captured_queries), 35)
 
     def test_purchase_item_price_update_rejects_negative_price(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")
