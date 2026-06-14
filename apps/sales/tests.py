@@ -286,6 +286,18 @@ class SalesNoAdminViewsTests(TestCase):
         self.assertContains(response, reverse("sales:sale_cash_to_credit", args=[sale.pk]))
         self.assertContains(response, "Перевести в кредит")
 
+    def test_sale_list_query_count_stays_bounded_without_full_count(self):
+        self._create_cash_sale_from_batch()
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(reverse("sales:sale_list"), HTTP_HOST="localhost")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(ctx.captured_queries), 8)
+        self.assertFalse(
+            any("COUNT(" in query["sql"].upper() for query in ctx.captured_queries)
+        )
+
     def test_cash_sale_can_be_converted_to_credit_safely(self):
         customer = Customer.objects.create(name="Арых")
         product = Product.objects.create(name="Черешня")
