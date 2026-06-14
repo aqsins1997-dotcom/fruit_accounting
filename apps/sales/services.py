@@ -2,8 +2,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models as django_models, transaction
-from django.db.models import Count, DecimalField, Sum, Value
-from django.db.models import Prefetch
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Sum, Value
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
@@ -390,55 +389,56 @@ def recalculate_sale_costs_for_purchase_item(purchase_item):
     now = timezone.now()
     changed_sale_ids = set()
     changed_sale_item_ids = []
-
-    sale_items = (
-        SaleItem.objects.select_for_update()
-        .filter(id__in=sale_item_ids, sale__deleted_at__isnull=True)
-        .prefetch_related(
-            Prefetch(
-                "batches",
-                queryset=SaleItemBatch.objects.select_related("purchase_item").filter(
-                    purchase_item__purchase__deleted_at__isnull=True,
-                    sale_item__sale__deleted_at__isnull=True,
-                ),
-            )
-        )
+    batch_cost = ExpressionWrapper(
+        F("quantity") * F("purchase_item__purchase_price_per_kg"),
+        output_field=MONEY_FIELD,
     )
-    for sale_item in sale_items:
-        total_cost = sum(
-            (
-                batch.quantity * batch.purchase_item.purchase_price_per_kg
-                for batch in sale_item.batches.all()
-            ),
-            ZERO,
+
+    sale_item_rows = (
+        SaleItemBatch.objects.filter(
+            sale_item_id__in=sale_item_ids,
+            purchase_item__purchase__deleted_at__isnull=True,
+            sale_item__sale__deleted_at__isnull=True,
         )
+        .values(
+            "sale_item_id",
+            "sale_item__sale_id",
+            "sale_item__quantity_kg",
+            "sale_item__line_total",
+        )
+        .annotate(total_cost=Coalesce(Sum(batch_cost), Value(ZERO, output_field=MONEY_FIELD)))
+    )
+
+    for row in sale_item_rows:
+        total_cost = row["total_cost"] or ZERO
         line_cost_total = _money(total_cost)
-        if sale_item.quantity_kg > Decimal("0.000"):
-            cost_price_per_kg = _money(total_cost / sale_item.quantity_kg)
+        quantity = row["sale_item__quantity_kg"] or Decimal("0.000")
+        if quantity > Decimal("0.000"):
+            cost_price_per_kg = _money(total_cost / quantity)
         else:
             cost_price_per_kg = ZERO
-        profit = _money(sale_item.line_total - line_cost_total)
+        profit = _money((row["sale_item__line_total"] or ZERO) - line_cost_total)
 
-        SaleItem.objects.filter(pk=sale_item.pk).update(
+        SaleItem.objects.filter(pk=row["sale_item_id"]).update(
             cost_price_per_kg=cost_price_per_kg,
             line_cost_total=line_cost_total,
             profit=profit,
             updated_at=now,
         )
-        changed_sale_ids.add(sale_item.sale_id)
-        changed_sale_item_ids.append(sale_item.id)
+        changed_sale_ids.add(row["sale_item__sale_id"])
+        changed_sale_item_ids.append(row["sale_item_id"])
 
-    for sale in Sale.objects.select_for_update().filter(
-        id__in=changed_sale_ids,
-        deleted_at__isnull=True,
-    ):
-        totals = SaleItem.objects.filter(sale=sale).aggregate(
-            total_cost=Coalesce(Sum("line_cost_total"), Value(ZERO, output_field=MONEY_FIELD)),
-            total_profit=Coalesce(Sum("profit"), Value(ZERO, output_field=MONEY_FIELD)),
-        )
-        Sale.objects.filter(pk=sale.pk).update(
-            total_cost=_money(totals["total_cost"]),
-            total_profit=_money(totals["total_profit"]),
+    sale_total_rows = SaleItem.objects.filter(
+        sale_id__in=changed_sale_ids,
+        sale__deleted_at__isnull=True,
+    ).values("sale_id").annotate(
+        total_cost=Coalesce(Sum("line_cost_total"), Value(ZERO, output_field=MONEY_FIELD)),
+        total_profit=Coalesce(Sum("profit"), Value(ZERO, output_field=MONEY_FIELD)),
+    )
+    for row in sale_total_rows:
+        Sale.objects.filter(pk=row["sale_id"], deleted_at__isnull=True).update(
+            total_cost=_money(row["total_cost"]),
+            total_profit=_money(row["total_profit"]),
             updated_at=now,
         )
 

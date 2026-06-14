@@ -48,6 +48,35 @@ class InventoryNoAdminViewsTests(TestCase):
         self.assertContains(purchase_response, "Изменить цену")
         self.assertContains(purchase_response, "Изменить товар")
 
+    def test_purchase_list_query_count_stays_bounded_without_full_count(self):
+        purchases = [
+            Purchase(supplier=self.supplier, date="2026-04-19")
+            for _ in range(45)
+        ]
+        Purchase.objects.bulk_create(purchases)
+        purchase_ids = list(Purchase.objects.order_by("id").values_list("id", flat=True))
+        PurchaseItem.objects.bulk_create(
+            [
+                PurchaseItem(
+                    purchase_id=purchase_id,
+                    store=self.store,
+                    product=self.product,
+                    quantity_kg=Decimal("10.000"),
+                    purchase_price_per_kg=Decimal("25.00"),
+                )
+                for purchase_id in purchase_ids
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(reverse("inventory:purchase_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(ctx.captured_queries), 8)
+        self.assertFalse(
+            any("COUNT(" in query["sql"].upper() for query in ctx.captured_queries)
+        )
+
     def test_purchase_profitability_is_calculated_per_batch(self):
         first_purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-06")
         first_item = PurchaseItem.objects.create(
@@ -232,7 +261,7 @@ class InventoryNoAdminViewsTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 302)
-        self.assertLessEqual(len(ctx.captured_queries), 35)
+        self.assertLessEqual(len(ctx.captured_queries), 22)
 
     def test_purchase_item_price_update_rejects_negative_price(self):
         purchase = Purchase.objects.create(supplier=self.supplier, date="2026-05-01")

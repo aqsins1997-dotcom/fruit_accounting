@@ -38,16 +38,21 @@ def _validate_non_negative_stock(quantity):
 
 
 def _weighted_average_purchase_price(*, store_id, product_id):
-    total_quantity = Decimal("0.000")
-    total_cost = Decimal("0.00")
-
-    for item in PurchaseItem.objects.filter(
+    totals = PurchaseItem.objects.filter(
         store_id=store_id,
         product_id=product_id,
         purchase__deleted_at__isnull=True,
-    ):
-        total_quantity += item.quantity_kg
-        total_cost += item.quantity_kg * item.purchase_price_per_kg
+    ).aggregate(
+        total_quantity=models.Sum("quantity_kg"),
+        total_cost=models.Sum(
+            models.ExpressionWrapper(
+                models.F("quantity_kg") * models.F("purchase_price_per_kg"),
+                output_field=models.DecimalField(max_digits=14, decimal_places=2),
+            )
+        ),
+    )
+    total_quantity = totals["total_quantity"] or Decimal("0.000")
+    total_cost = totals["total_cost"] or Decimal("0.00")
 
     if total_quantity <= 0:
         return Decimal("0.00")
